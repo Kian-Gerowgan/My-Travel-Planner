@@ -118,6 +118,29 @@ export async function updateJson(id: string, data: unknown): Promise<DriveFile> 
   return r.json();
 }
 
+/** Uploads a binary file (resumable upload, so large PDFs and photos work too). */
+export async function uploadBlob(parentId: string, name: string, blob: Blob): Promise<DriveFile> {
+  const init = await call(`${UPLOAD}/files?uploadType=resumable&fields=${FIELDS}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': blob.type || 'application/octet-stream' },
+    body: JSON.stringify({ name, parents: [parentId] }),
+  });
+  const location = init.headers.get('Location');
+  if (!location) throw new Error('Google Drive did not accept the upload.');
+  const res = await fetch(location, { method: 'PUT', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+  if (!res.ok) throw new Error(`Upload to Google Drive failed (${res.status}).`);
+  return res.json();
+}
+
+export async function downloadBlob(id: string): Promise<Blob> {
+  return (await call(`${API}/files/${id}?alt=media`)).blob();
+}
+
+/** Moves a file to the Drive trash (recoverable for 30 days). */
+export async function trashFile(id: string) {
+  await call(`${API}/files/${id}?fields=id`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+}
+
 export async function copyFile(id: string, name: string, parentId: string) {
   await call(`${API}/files/${id}/copy?fields=id`, json({ name, parents: [parentId] }));
 }

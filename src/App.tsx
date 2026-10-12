@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
 import { useDriveSync } from './sync';
+import { useFileSync } from './files';
+import { renderPdf } from './pdf';
 
 /* =========================================================================
    TYPES
@@ -7,18 +9,19 @@ import { useDriveSync } from './sync';
 type ActivityType = 'flight' | 'train' | 'hotel' | 'meeting' | 'transfer' | 'personal';
 interface Note { id: string; text: string; createdAt: string; }
 interface Task { id: string; text: string; done: boolean; }
-interface Attachment { id: string; name: string; size: number; }
 interface Activity {
   id: string; tripId: string; type: ActivityType; title: string;
   start: string; startTz: string;          // local wall time "YYYY-MM-DDTHH:mm" + IANA zone
   end?: string; endTz?: string;
   city?: string; location?: string;
   details: Record<string, string>;
-  contactIds: string[]; notes: Note[]; tasks: Task[]; attachments: Attachment[];
+  contactIds: string[]; notes: Note[]; tasks: Task[];
 }
 interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
-interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; sample?: boolean; }
+/** A file belonging to a trip. Uploaded once; linked to any number of the trip's stages (none = general). */
+interface Doc { id: string; tripId: string; name: string; mime: string; size: number; activityIds: string[]; addedAt: string; driveId?: string; }
+interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; documents: Doc[]; sample?: boolean; }
 interface Entry { key: string; a: Activity; kind: 'main' | 'arrival' | 'checkout'; date: string; time: string; endTime?: string; ms: number; endMs?: number; }
 
 /* =========================================================================
@@ -167,6 +170,31 @@ function buildEntries(acts: Activity[]): Entry[] {
   });
   return out.sort((x, y) => x.ms - y.ms || (x.kind === 'checkout' ? -1 : 0) - (y.kind === 'checkout' ? -1 : 0));
 }
+/** Brings older saved data up to the current shape. */
+function migrate(d: any): Data {
+  return {
+    ...d,
+    documents: d.documents || [],
+    activities: (d.activities || []).map(({ attachments, ...a }: any) => a),
+  };
+}
+
+/* Colour family per stage: transport (blue), hotel (cognac), meeting (magenta), personal (neutral). */
+type Tone = 'transport' | 'hotel' | 'meeting' | 'personal';
+const toneOf = (t: ActivityType): Tone => t === 'flight' || t === 'train' || t === 'transfer' ? 'transport' : t === 'hotel' ? 'hotel' : t === 'meeting' ? 'meeting' : 'personal';
+
+const isImage = (d: { mime: string }) => d.mime.startsWith('image/');
+const guessMime = (name: string) => /\.pdf$/i.test(name) ? 'application/pdf' : /\.png$/i.test(name) ? 'image/png' : /\.(jpe?g)$/i.test(name) ? 'image/jpeg' : /\.heic$/i.test(name) ? 'image/heic' : 'application/octet-stream';
+function docName(f: File) {
+  // Camera photos arrive as "image.jpg" or "IMG_1234.JPG"; give them a readable name.
+  if (/^(image|img_?\d*|photo)(\.\w+)?$/i.test(f.name.replace(/\.\w+$/, '')) || /^image\.\w+$/i.test(f.name)) {
+    const n = new Date();
+    return `Photo ${todayStr()} ${pad(n.getHours())}-${pad(n.getMinutes())}.${(f.name.split('.').pop() || 'jpg').toLowerCase()}`;
+  }
+  return f.name;
+}
+const fileSize = (b: number) => b < 1e6 ? `${Math.max(1, Math.round(b / 1000))} KB` : `${(b / 1e6).toFixed(1)} MB`;
+
 function findNext(entries: Entry[]) {
   const now = Date.now();
   return entries.find(e => (e.kind === 'main' && e.a.type !== 'hotel' && e.endMs && e.ms <= now && e.endMs > now) || e.ms >= now);
@@ -215,9 +243,8 @@ function entryView(e: Entry): EntryView {
 function sampleData(): Data {
   const n = (text: string, createdAt = '2026-10-05T09:00'): Note => ({ id: uid(), text, createdAt });
   const t = (text: string, done = false): Task => ({ id: uid(), text, done });
-  const f = (name: string, size: number): Attachment => ({ id: uid(), name, size });
   const A = (tripId: string, type: ActivityType, title: string, start: string, startTz: string, end: string | undefined, endTz: string | undefined, extra: Partial<Activity> = {}): Activity =>
-    ({ id: uid(), tripId, type, title, start, startTz, end, endTz: endTz || startTz, city: '', location: '', details: {}, contactIds: [], notes: [], tasks: [], attachments: [], ...extra });
+    ({ id: uid(), tripId, type, title, start, startTz, end, endTz: endTz || startTz, city: '', location: '', details: {}, contactIds: [], notes: [], tasks: [], ...extra });
   const B = 'Europe/Berlin', SH = 'Asia/Shanghai', DX = 'Asia/Dubai', BA = 'Asia/Makassar';
 
   const contacts: Contact[] = [
@@ -225,83 +252,38 @@ function sampleData(): Data {
     { id: 'c2', name: 'Chen Li', company: 'BMS Xiamen Manufacturing', position: 'Plant Manager', phone: '+86 592 6012 345', email: 'chen.li@bms-xiamen.example', country: 'China', city: 'Xiamen', notes: 'Contact for quality and capacity planning.' },
     { id: 'c3', name: 'Huang Jun', company: 'Xiamen Seaport Logistics', position: 'Key Account Manager', phone: '+86 592 5550 188', email: 'huang.jun@xsl-logistics.example', country: 'China', city: 'Xiamen', notes: '' },
     { id: 'c4', name: 'Liu Yang', company: 'Guangzhou Homeware Co.', position: 'Export Manager', phone: '+86 20 8336 7799', email: 'liu.yang@gz-homeware.example', country: 'China', city: 'Guangzhou', notes: 'We met at the Canton Fair 2024.' },
-    { id: 'c5', name: 'Omar Al Hashimi', company: 'Al Noor Trading LLC', position: 'Managing Director', phone: '+971 4 123 4567', email: 'omar@alnoor-trading.example', country: 'UAE', city: 'Dubai', notes: 'Prefers morning meetings.' },
-    { id: 'c6', name: 'Sarah Becker', company: 'Becker Consulting FZ-LLC', position: 'Founder', phone: '+971 50 765 4321', email: 'sarah@becker-consulting.example', country: 'UAE', city: 'Dubai', notes: '' },
-    { id: 'c7', name: 'Thomas Wagner', company: 'Alpenwerk Maschinenbau GmbH', position: 'Head of Purchasing', phone: '+49 89 2190 4410', email: 't.wagner@alpenwerk.example', country: 'Germany', city: 'Munich', notes: '' },
   ];
 
   const trips: Trip[] = [
-    { id: 'muc', name: 'Munich – Client Meetings', kind: 'business', countries: ['Germany'], cities: ['Frankfurt', 'Munich'], start: '2026-10-11', end: '2026-10-13', archived: false },
     { id: 'cn', name: 'China Business Trip – October 2026', kind: 'business', countries: ['China'], cities: ['Shanghai', 'Xiamen', 'Guangzhou'], start: '2026-10-18', end: '2026-10-27', archived: false },
-    { id: 'dxb', name: 'Dubai Business Trip – November 2026', kind: 'business', countries: ['UAE'], cities: ['Dubai'], start: '2026-11-15', end: '2026-11-19', archived: false },
-    { id: 'bali', name: 'Bali Holiday – December 2026', kind: 'private', countries: ['Indonesia'], cities: ['Denpasar', 'Nusa Dua'], start: '2026-12-19', end: '2026-12-31', archived: false },
-    { id: 'ham', name: 'Hamburg – Logistics Workshop', kind: 'business', countries: ['Germany'], cities: ['Hamburg'], start: '2026-09-08', end: '2026-09-09', archived: false },
   ];
 
   const activities: Activity[] = [
-    // Munich
-    A('muc', 'train', 'Train Frankfurt → Munich', '2026-10-11T16:54', B, '2026-10-11T20:05', B, { details: { operator: 'Deutsche Bahn', trainNo: 'ICE 599', from: 'Frankfurt (Main) Hbf', to: 'Munich Hbf', seat: 'Coach 23, seat 51', bookingRef: 'QX7K2P' }, attachments: [f('DB_Ticket_ICE599.pdf', 182000)] }),
-    A('muc', 'hotel', 'Hotel Bayerischer Hof', '2026-10-11T20:45', B, '2026-10-13T11:00', B, { city: 'Munich', details: { address: 'Promenadeplatz 2–6, 80333 Munich', phone: '+49 89 21200', bookingRef: 'BH-558213', room: 'Superior double room, non-smoking' } }),
-    A('muc', 'meeting', 'Annual purchasing review', '2026-10-12T10:00', B, '2026-10-12T12:00', B, { city: 'Munich', location: 'Landsberger Str. 300, Munich', contactIds: ['c7'], details: { company: 'Alpenwerk Maschinenbau GmbH', agenda: 'Framework contract 2027\nPrice adjustment\nQ1 delivery dates' }, tasks: [t('Send quote by Friday')], notes: [n('Propose volume discount from 5,000 units.')] }),
-    A('muc', 'meeting', 'Plant tour', '2026-10-12T15:00', B, '2026-10-12T16:30', B, { city: 'Munich', location: 'Alpenwerk, Allach plant', contactIds: ['c7'], details: { company: 'Alpenwerk Maschinenbau GmbH' } }),
-    A('muc', 'personal', 'Dinner with Thomas Wagner', '2026-10-12T19:30', B, '2026-10-12T22:00', B, { city: 'Munich', location: 'Schwarzreiter, Maximilianstraße 17', details: { description: 'Table booked under my name.' } }),
-    A('muc', 'train', 'Train Munich → Frankfurt', '2026-10-13T13:13', B, '2026-10-13T16:35', B, { details: { operator: 'Deutsche Bahn', trainNo: 'ICE 628', from: 'Munich Hbf', to: 'Frankfurt (Main) Hbf', seat: 'Coach 21, seat 33', bookingRef: 'QX7K2P' } }),
-
-    // China
     A('cn', 'transfer', 'Transfer to the airport', '2026-10-18T11:30', B, undefined, undefined, { city: 'Frankfurt', details: { mode: 'Taxi', provider: 'Taxi Frankfurt', from: 'Home', to: 'Frankfurt Airport, Terminal 1', phone: '+49 69 230001' } }),
-    A('cn', 'flight', 'Flight Frankfurt → Shanghai', '2026-10-18T14:40', B, '2026-10-19T08:30', SH, { details: { airline: 'Lufthansa', flightNo: 'LH 728', from: 'Frankfurt (FRA)', to: 'Shanghai Pudong (PVG)', terminal: '1', gate: 'Z25', seat: '4K', bookingRef: 'LH9QX2' }, notes: [n('Do online check-in 23 h before departure.')], attachments: [f('Ticket_LH728.pdf', 241000), f('Boarding_pass_LH728.pdf', 96000)] }),
+    A('cn', 'flight', 'Flight Frankfurt → Shanghai', '2026-10-18T14:40', B, '2026-10-19T08:30', SH, { details: { airline: 'Lufthansa', flightNo: 'LH 728', from: 'Frankfurt (FRA)', to: 'Shanghai Pudong (PVG)', terminal: '1', gate: 'Z25', seat: '4K', bookingRef: 'LH9QX2' }, notes: [n('Do online check-in 23 h before departure.')] }),
     A('cn', 'transfer', 'Transfer to the hotel', '2026-10-19T10:00', SH, '2026-10-19T10:50', SH, { city: 'Shanghai', details: { mode: 'Private driver', provider: 'Mr. Li (arranged by Huaxin)', from: 'Pudong Airport (PVG), arrivals hall', to: 'JW Marriott Tomorrow Square', phone: '+86 139 1234 5678' }, notes: [n('Driver waits with a name sign at exit B.')] }),
-    A('cn', 'hotel', 'JW Marriott Hotel Shanghai at Tomorrow Square', '2026-10-19T11:00', SH, '2026-10-20T07:15', SH, { city: 'Shanghai', details: { address: '399 Nanjing West Road, Huangpu, Shanghai', phone: '+86 21 5359 4969', bookingRef: 'MAR-77412093', room: 'Deluxe King, Executive Lounge' }, notes: [n('Early check-in confirmed.')], attachments: [f('Hotel_confirmation_JW_Marriott.pdf', 158000)] }),
-    A('cn', 'meeting', 'Supplier meeting – Supplier A', '2026-10-19T14:30', SH, '2026-10-19T16:00', SH, { city: 'Shanghai', location: 'Huaxin Showroom, 1888 Century Avenue, Pudong', contactIds: ['c1'], details: { company: 'Shanghai Huaxin Electronics', agenda: 'Pricing for Q1 2027 shipment\nNew product samples\nDelivery times' }, tasks: [t('Request Q1 price list'), t('Reserve samples for the trade fair')], notes: [n('Discuss pricing for next shipment.'), n('Bring product samples.')], attachments: [f('Agenda_Huaxin.pdf', 64000)] }),
+    A('cn', 'hotel', 'JW Marriott Hotel Shanghai at Tomorrow Square', '2026-10-19T11:00', SH, '2026-10-20T07:15', SH, { city: 'Shanghai', details: { address: '399 Nanjing West Road, Huangpu, Shanghai', phone: '+86 21 5359 4969', bookingRef: 'MAR-77412093', room: 'Deluxe King, Executive Lounge' }, notes: [n('Early check-in confirmed.')] }),
+    A('cn', 'meeting', 'Supplier meeting – Supplier A', '2026-10-19T14:30', SH, '2026-10-19T16:00', SH, { city: 'Shanghai', location: 'Huaxin Showroom, 1888 Century Avenue, Pudong', contactIds: ['c1'], details: { company: 'Shanghai Huaxin Electronics', agenda: 'Pricing for Q1 2027 shipment\nNew product samples\nDelivery times' }, tasks: [t('Request Q1 price list'), t('Reserve samples for the trade fair')], notes: [n('Discuss pricing for next shipment.'), n('Bring product samples.')] }),
     A('cn', 'personal', 'Dinner on the Bund', '2026-10-19T19:00', SH, '2026-10-19T21:00', SH, { city: 'Shanghai', location: 'Lost Heaven, 17 Yan’an East Road', details: { description: 'Table for two booked.' } }),
     A('cn', 'transfer', 'Transfer to Hongqiao Airport', '2026-10-20T07:30', SH, '2026-10-20T08:15', SH, { city: 'Shanghai', details: { mode: 'Taxi', from: 'Hotel', to: 'Hongqiao Airport (SHA), Terminal 2' } }),
-    A('cn', 'flight', 'Flight Shanghai → Xiamen', '2026-10-20T09:15', SH, '2026-10-20T11:10', SH, { details: { airline: 'Xiamen Airlines', flightNo: 'MF 8506', from: 'Shanghai Hongqiao (SHA)', to: 'Xiamen Gaoqi (XMN)', terminal: '2', seat: '12A', bookingRef: 'MF3KD8' }, attachments: [f('Ticket_MF8506.pdf', 120000)] }),
+    A('cn', 'flight', 'Flight Shanghai → Xiamen', '2026-10-20T09:15', SH, '2026-10-20T11:10', SH, { details: { airline: 'Xiamen Airlines', flightNo: 'MF 8506', from: 'Shanghai Hongqiao (SHA)', to: 'Xiamen Gaoqi (XMN)', terminal: '2', seat: '12A', bookingRef: 'MF3KD8' } }),
     A('cn', 'hotel', 'Conrad Xiamen', '2026-10-20T12:30', SH, '2026-10-22T08:30', SH, { city: 'Xiamen', details: { address: '398 Hubin North Road, Siming, Xiamen', phone: '+86 592 572 8888', bookingRef: 'HH-49283311', room: 'King Deluxe, sea view' } }),
     A('cn', 'meeting', 'Factory visit – BMS Xiamen', '2026-10-20T15:00', SH, '2026-10-20T17:00', SH, { city: 'Xiamen', location: 'BMS Plant 2, Xiang’an Industrial Park', contactIds: ['c2'], details: { company: 'BMS Xiamen Manufacturing', agenda: 'Production walk-through\nQuality assurance\nCapacity planning 2027' }, notes: [n('Bring safety shoes.')] }),
     A('cn', 'meeting', 'Quality audit', '2026-10-21T09:30', SH, '2026-10-21T12:00', SH, { city: 'Xiamen', location: 'BMS Plant 2, meeting room 3', contactIds: ['c2'], details: { company: 'BMS Xiamen Manufacturing' }, tasks: [t('Request audit report')] }),
     A('cn', 'meeting', 'Logistics alignment', '2026-10-21T14:00', SH, '2026-10-21T15:30', SH, { city: 'Xiamen', location: 'Xiamen Seaport Logistics, Haicang', contactIds: ['c3'], details: { company: 'Xiamen Seaport Logistics' }, notes: [n('Ask about lead times from Xiamen port.')] }),
     A('cn', 'train', 'Train Xiamen → Guangzhou', '2026-10-22T10:05', SH, '2026-10-22T13:52', SH, { details: { operator: 'China Railway', trainNo: 'G 1612', from: 'Xiamen North', to: 'Guangzhou South', seat: 'Coach 3, seat 7F (Business)', bookingRef: 'E482190563' }, notes: [n('Keep passport ready for the ticket check.')] }),
     A('cn', 'transfer', 'Transfer to the hotel', '2026-10-22T14:15', SH, '2026-10-22T15:10', SH, { city: 'Guangzhou', details: { mode: 'DiDi', from: 'Guangzhou South station', to: 'The Ritz-Carlton, Guangzhou' } }),
-    A('cn', 'hotel', 'The Ritz-Carlton, Guangzhou', '2026-10-22T15:30', SH, '2026-10-26T18:00', SH, { city: 'Guangzhou', details: { address: '3 Xing An Road, Pearl River New City, Tianhe', phone: '+86 20 3813 6888', bookingRef: 'MAR-77413580', room: 'Deluxe Room, river view' }, notes: [n('Late check-out until 18:00 confirmed.')], attachments: [f('Confirmation_RitzCarlton.pdf', 171000)] }),
-    A('cn', 'personal', 'Canton Fair – Phase 2', '2026-10-23T09:00', SH, '2026-10-23T17:00', SH, { city: 'Guangzhou', location: 'Canton Fair Complex, Pazhou', details: { description: 'Halls 11–13: homeware & gifts' }, attachments: [f('Canton_Fair_Badge.pdf', 88000)] }),
+    A('cn', 'hotel', 'The Ritz-Carlton, Guangzhou', '2026-10-22T15:30', SH, '2026-10-26T18:00', SH, { city: 'Guangzhou', details: { address: '3 Xing An Road, Pearl River New City, Tianhe', phone: '+86 20 3813 6888', bookingRef: 'MAR-77413580', room: 'Deluxe Room, river view' }, notes: [n('Late check-out until 18:00 confirmed.')] }),
+    A('cn', 'personal', 'Canton Fair – Phase 2', '2026-10-23T09:00', SH, '2026-10-23T17:00', SH, { city: 'Guangzhou', location: 'Canton Fair Complex, Pazhou', details: { description: 'Halls 11–13: homeware & gifts' } }),
     A('cn', 'meeting', 'Trade fair meeting', '2026-10-23T10:30', SH, '2026-10-23T11:30', SH, { city: 'Guangzhou', location: 'Canton Fair, booth 11.2 C18', contactIds: ['c4'], details: { company: 'Guangzhou Homeware Co.' } }),
     A('cn', 'meeting', 'Product development & samples', '2026-10-24T10:00', SH, '2026-10-24T12:00', SH, { city: 'Guangzhou', location: 'Guangzhou Homeware showroom, Haizhu', contactIds: ['c4'], details: { company: 'Guangzhou Homeware Co.', agenda: 'Sample approval\nPackaging\nFirst-order timeline' }, tasks: [t('Bring packaging draft', true)] }),
     A('cn', 'personal', 'Shamian Island & tea house', '2026-10-24T15:00', SH, '2026-10-24T18:00', SH, { city: 'Guangzhou', location: 'Shamian Island' }),
     A('cn', 'transfer', 'Transfer to the airport', '2026-10-26T20:30', SH, '2026-10-26T21:20', SH, { city: 'Guangzhou', details: { mode: 'Hotel limousine', provider: 'The Ritz-Carlton', from: 'Hotel', to: 'Baiyun Airport (CAN), Terminal 2', phone: '+86 20 3813 6888' } }),
-    A('cn', 'flight', 'Flight Guangzhou → Frankfurt', '2026-10-26T23:55', SH, '2026-10-27T05:55', B, { details: { airline: 'China Southern', flightNo: 'CZ 331', from: 'Guangzhou Baiyun (CAN)', to: 'Frankfurt (FRA)', terminal: '2', seat: '14A', bookingRef: 'CZ8PL4' }, attachments: [f('Ticket_CZ331.pdf', 133000)] }),
+    A('cn', 'flight', 'Flight Guangzhou → Frankfurt', '2026-10-26T23:55', SH, '2026-10-27T05:55', B, { details: { airline: 'China Southern', flightNo: 'CZ 331', from: 'Guangzhou Baiyun (CAN)', to: 'Frankfurt (FRA)', terminal: '2', seat: '14A', bookingRef: 'CZ8PL4' } }),
     A('cn', 'transfer', 'Transfer home', '2026-10-27T07:00', B, undefined, undefined, { city: 'Frankfurt', details: { mode: 'Taxi', from: 'Frankfurt Airport', to: 'Home' } }),
 
-    // Dubai
-    A('dxb', 'flight', 'Flight Frankfurt → Dubai', '2026-11-15T14:40', B, '2026-11-15T23:40', DX, { details: { airline: 'Emirates', flightNo: 'EK 46', from: 'Frankfurt (FRA)', to: 'Dubai (DXB)', terminal: '2', seat: '7A', bookingRef: 'EK4MZT' }, attachments: [f('E-ticket_EK46.pdf', 205000)] }),
-    A('dxb', 'transfer', 'Transfer to the hotel', '2026-11-16T00:10', DX, '2026-11-16T00:40', DX, { city: 'Dubai', details: { mode: 'Hotel limousine', provider: 'Address Downtown', from: 'DXB Terminal 3', to: 'Address Downtown' } }),
-    A('dxb', 'hotel', 'Address Downtown', '2026-11-16T00:45', DX, '2026-11-19T06:00', DX, { city: 'Dubai', details: { address: 'Sheikh Mohammed bin Rashid Blvd, Downtown Dubai', phone: '+971 4 436 8888', bookingRef: 'ADR-920144', room: 'Deluxe Room, Burj Khalifa view' } }),
-    A('dxb', 'meeting', 'Contract negotiation', '2026-11-16T10:00', DX, '2026-11-16T11:30', DX, { city: 'Dubai', location: 'Al Noor Tower, Business Bay', contactIds: ['c5'], details: { company: 'Al Noor Trading LLC', agenda: 'GCC distribution agreement\nTerms\nMarketing budget' }, notes: [n('Confirm meeting one day before.')] }),
-    A('dxb', 'meeting', 'Business lunch', '2026-11-16T13:00', DX, '2026-11-16T14:30', DX, { city: 'Dubai', location: 'Zuma, DIFC Gate Village 06', contactIds: ['c6'], details: { company: 'Becker Consulting FZ-LLC' } }),
-    A('dxb', 'meeting', 'Warehouse visit Jebel Ali', '2026-11-17T10:00', DX, '2026-11-17T12:00', DX, { city: 'Dubai', location: 'Jebel Ali Free Zone, South', contactIds: ['c5'], details: { company: 'Al Noor Trading LLC' } }),
-    A('dxb', 'personal', 'Desert trip', '2026-11-18T15:00', DX, '2026-11-18T21:00', DX, { city: 'Dubai', location: 'Al Marmoom Desert Conservation Reserve' }),
-    A('dxb', 'flight', 'Flight Dubai → Frankfurt', '2026-11-19T08:25', DX, '2026-11-19T12:10', B, { details: { airline: 'Emirates', flightNo: 'EK 45', from: 'Dubai (DXB)', to: 'Frankfurt (FRA)', terminal: '3', seat: '7A', bookingRef: 'EK4MZT' } }),
-
-    // Bali
-    A('bali', 'flight', 'Flight Frankfurt → Dubai', '2026-12-19T21:55', B, '2026-12-20T06:15', DX, { details: { airline: 'Emirates', flightNo: 'EK 44', from: 'Frankfurt (FRA)', to: 'Dubai (DXB)', seat: '32A', bookingRef: 'EK7BLI' } }),
-    A('bali', 'flight', 'Flight Dubai → Denpasar', '2026-12-20T09:25', DX, '2026-12-20T22:45', BA, { details: { airline: 'Emirates', flightNo: 'EK 398', from: 'Dubai (DXB)', to: 'Denpasar (DPS)', seat: '32A', bookingRef: 'EK7BLI' }, attachments: [f('E-ticket_Bali.pdf', 310000)] }),
-    A('bali', 'transfer', 'Transfer to Sanur', '2026-12-20T23:30', BA, '2026-12-21T00:10', BA, { city: 'Denpasar', details: { mode: 'Hotel shuttle', from: 'DPS airport', to: 'Hyatt Regency Bali, Sanur' } }),
-    A('bali', 'hotel', 'Hyatt Regency Bali', '2026-12-21T00:15', BA, '2026-12-24T11:00', BA, { city: 'Denpasar', details: { address: 'Jl. Danau Tamblingan 89, Sanur, Denpasar', phone: '+62 361 281234', bookingRef: 'HY-662190', room: 'King, garden view' } }),
-    A('bali', 'personal', 'Balinese cooking class', '2026-12-22T09:00', BA, '2026-12-22T13:00', BA, { city: 'Denpasar', location: 'Sanur' }),
-    A('bali', 'personal', 'Day trip Ubud & rice terraces', '2026-12-23T08:00', BA, '2026-12-23T18:00', BA, { city: 'Ubud', location: 'Tegallalang' }),
-    A('bali', 'transfer', 'Transfer to Nusa Dua', '2026-12-24T11:30', BA, '2026-12-24T12:15', BA, { city: 'Denpasar', details: { mode: 'Private driver', from: 'Hyatt Regency Bali', to: 'The Mulia, Nusa Dua' } }),
-    A('bali', 'hotel', 'The Mulia, Nusa Dua', '2026-12-24T14:00', BA, '2026-12-30T12:00', BA, { city: 'Nusa Dua', details: { address: 'Jl. Raya Nusa Dua Selatan, Nusa Dua', phone: '+62 361 3027777', bookingRef: 'MUL-38812', room: 'Grandeur Suite, ocean view' } }),
-    A('bali', 'personal', 'Christmas Eve dinner', '2026-12-24T19:00', BA, '2026-12-24T22:00', BA, { city: 'Nusa Dua', location: 'The Mulia, Table8' }),
-    A('bali', 'personal', 'Uluwatu Temple & Kecak dance', '2026-12-27T16:30', BA, '2026-12-27T20:00', BA, { city: 'Uluwatu', location: 'Pura Luhur Uluwatu' }),
-    A('bali', 'flight', 'Flight Denpasar → Dubai', '2026-12-30T21:20', BA, '2026-12-31T02:10', DX, { details: { airline: 'Emirates', flightNo: 'EK 369', from: 'Denpasar (DPS)', to: 'Dubai (DXB)', seat: '30K', bookingRef: 'EK7BLI' } }),
-    A('bali', 'flight', 'Flight Dubai → Frankfurt', '2026-12-31T08:25', DX, '2026-12-31T12:10', B, { details: { airline: 'Emirates', flightNo: 'EK 45', from: 'Dubai (DXB)', to: 'Frankfurt (FRA)', seat: '30K', bookingRef: 'EK7BLI' } }),
-
-    // Hamburg (completed)
-    A('ham', 'train', 'Train Frankfurt → Hamburg', '2026-09-08T08:54', B, '2026-09-08T12:32', B, { details: { operator: 'Deutsche Bahn', trainNo: 'ICE 578', from: 'Frankfurt (Main) Hbf', to: 'Hamburg Hbf' } }),
-    A('ham', 'meeting', 'Port logistics workshop', '2026-09-08T14:00', B, '2026-09-08T17:00', B, { city: 'Hamburg', location: 'HafenCity, Am Sandtorkai 50', details: { company: 'Hanse Logistik GmbH' } }),
-    A('ham', 'hotel', 'The Fontenay', '2026-09-08T18:00', B, '2026-09-09T10:00', B, { city: 'Hamburg', details: { address: 'Fontenay 10, 20354 Hamburg' } }),
-    A('ham', 'train', 'Train Hamburg → Frankfurt', '2026-09-09T12:01', B, '2026-09-09T15:46', B, { details: { operator: 'Deutsche Bahn', trainNo: 'ICE 577', from: 'Hamburg Hbf', to: 'Frankfurt (Main) Hbf' } }),
   ];
-  return { version: 2, trips, activities, contacts, sample: true };
+  return { version: 2, trips, activities, contacts, documents: [], sample: true };
 }
 
 /* =========================================================================
@@ -347,6 +329,9 @@ const ICONS: Record<string, string> = {
   eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
 };
 function Icon({ name, size = 18, className = '', stroke = 1.75 }: { name: string; size?: number; className?: string; stroke?: number }) {
@@ -362,7 +347,7 @@ const useStore = () => useContext(StoreCtx);
 
 export function StoreProvider({ children }: { children: any }) {
   const [data, setData] = useState<Data>(() => {
-    try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+    try { const raw = localStorage.getItem(STORE_KEY); if (raw) return migrate(JSON.parse(raw)); } catch (e) {}
     return sampleData();
   });
   useEffect(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) {} }, [data]);
@@ -373,7 +358,6 @@ export function StoreProvider({ children }: { children: any }) {
     const edit = (f: (d: Data) => Data) => setData(d => { const n = f(d); return n === d ? d : { ...n, sample: false }; });
     return {
       saveTrip: (t: Trip) => edit(d => ({ ...d, trips: upsert(d.trips, t) })),
-      deleteTrip: (id: string) => edit(d => ({ ...d, trips: d.trips.filter(t => t.id !== id), activities: d.activities.filter(a => a.tripId !== id) })),
       duplicateTrip: (id: string) => edit(d => {
         const t = d.trips.find(x => x.id === id); if (!t) return d;
         const nid = uid();
@@ -383,7 +367,11 @@ export function StoreProvider({ children }: { children: any }) {
       setArchived: (id: string, archived: boolean) => edit(d => ({ ...d, trips: d.trips.map(t => t.id === id ? { ...t, archived } : t) })),
       saveActivity: (a: Activity) => edit(d => ({ ...d, activities: upsert(d.activities, a) })),
       updateActivity: (id: string, fn: (a: Activity) => Activity) => edit(d => ({ ...d, activities: d.activities.map(a => a.id === id ? fn(a) : a) })),
-      deleteActivity: (id: string) => edit(d => ({ ...d, activities: d.activities.filter(a => a.id !== id) })),
+      deleteActivity: (id: string) => edit(d => ({ ...d, activities: d.activities.filter(a => a.id !== id), documents: d.documents.map(x => x.activityIds.includes(id) ? { ...x, activityIds: x.activityIds.filter(y => y !== id) } : x) })),
+      setDocStages: (docIds: string[], activityIds: string[]) => edit(d => ({ ...d, documents: d.documents.map(x => docIds.includes(x.id) ? { ...x, activityIds } : x) })),
+      linkDocs: (docIds: string[], activityId: string) => edit(d => ({ ...d, documents: d.documents.map(x => docIds.includes(x.id) && !x.activityIds.includes(activityId) ? { ...x, activityIds: [...x.activityIds, activityId] } : x) })),
+      unlinkDoc: (docId: string, activityId: string) => edit(d => ({ ...d, documents: d.documents.map(x => x.id === docId ? { ...x, activityIds: x.activityIds.filter(y => y !== activityId) } : x) })),
+      setDocDriveId: (docId: string, driveId: string) => edit(d => ({ ...d, documents: d.documents.map(x => x.id === docId ? { ...x, driveId } : x) })),
       duplicateActivity: (id: string) => edit(d => {
         const a = d.activities.find(x => x.id === id); if (!a) return d;
         const c = clone(a); c.id = uid(); c.title = a.title + ' (copy)';
@@ -394,11 +382,35 @@ export function StoreProvider({ children }: { children: any }) {
       deleteContact: (id: string) => edit(d => ({ ...d, contacts: d.contacts.filter(c => c.id !== id), activities: d.activities.map(a => ({ ...a, contactIds: a.contactIds.filter(x => x !== id) })) })),
       importContacts: (list: Contact[]) => edit(d => ({ ...d, contacts: [...d.contacts, ...list] })),
       reset: () => setData(sampleData()),
+      edit,
     };
   }, []);
-  const replaceData = useCallback((d: any) => setData(d), []);
+  const replaceData = useCallback((d: any) => setData(migrate(d)), []);
   const sync = useDriveSync(data, replaceData);
-  return <StoreCtx.Provider value={{ data, sync, ...api }}>{children}</StoreCtx.Provider>;
+  const files = useFileSync(data.documents, data.trips, sync, api.setDocDriveId);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
+  const docApi = useMemo(() => ({
+    /** Stores the files on this device and adds them to the trip; uploading to Drive happens in the background. */
+    addDocuments: async (tripId: string, list: File[], activityIds: string[] = []): Promise<Doc[]> => {
+      const docs: Doc[] = list.map(f => ({ id: uid(), tripId, name: docName(f), mime: f.type || guessMime(f.name), size: f.size, activityIds, addedAt: nowLocal() }));
+      for (let i = 0; i < docs.length; i++) await files.saveLocal(docs[i].id, list[i]);
+      api.edit(d => ({ ...d, documents: [...d.documents, ...docs] }));
+      return docs;
+    },
+    deleteDoc: (id: string) => {
+      const doc = dataRef.current.documents.find(x => x.id === id);
+      if (doc) files.removeLocal(doc);
+      api.edit(d => ({ ...d, documents: d.documents.filter(x => x.id !== id) }));
+    },
+    deleteTrip: (id: string) => {
+      dataRef.current.documents.filter(x => x.tripId === id).forEach(files.removeLocal);
+      api.edit(d => ({ ...d, trips: d.trips.filter(t => t.id !== id), activities: d.activities.filter(a => a.tripId !== id), documents: d.documents.filter(x => x.tripId !== id) }));
+    },
+  }), [api, files.saveLocal, files.removeLocal]);
+
+  return <StoreCtx.Provider value={{ data, sync, files, ...api, ...docApi }}>{children}</StoreCtx.Provider>;
 }
 
 const UICtx = createContext<any>(null);
@@ -529,34 +541,35 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
   const a = e.a, d = a.details;
   const names = e.kind === 'main' ? a.contactIds.map(id => data.contacts.find((c: Contact) => c.id === id)?.name).filter(Boolean) : [];
   const shift = a.end ? daysBetween(a.start.slice(0, 10), a.end.slice(0, 10)) : 0;
+  const docCount = e.kind === 'main' ? data.documents.filter((x: Doc) => x.activityIds.includes(a.id)).length : 0;
   const sub = highlight ? 'text-white/75' : 'text-muted';
   return (
     <button onClick={() => ui.openActivity(a.id)}
-      className={`group w-full text-left rounded-2xl p-4 transition duration-200 ${highlight ? 'bg-petrol-fill text-white shadow-lift ring-1 ring-white/10' : 'bg-pale hover:shadow-soft hover:-translate-y-px'} ${e.kind !== 'main' && !highlight ? 'bg-pale/60' : ''}`}>
+      className={`group w-full text-left rounded-2xl p-4 transition duration-200 tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong text-white' : 'tone-card hover:shadow-soft hover:-translate-y-px'} ${e.kind !== 'main' && !highlight ? 'opacity-80' : ''}`}>
       {highlight && (
         <div className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]">
           <span className="h-1.5 w-1.5 rounded-full bg-[#F0C9A3] pulse-dot" />{nextLabel(e)}
         </div>
       )}
       <div className="flex gap-3.5">
-        <div className={`h-10 w-10 rounded-xl grid place-items-center shrink-0 ${highlight ? 'bg-white/15 text-white' : 'bg-card text-petrol'}`}><Icon name={v.icon} size={19} /></div>
+        <div className={`h-10 w-10 rounded-xl grid place-items-center shrink-0 ${highlight ? 'bg-white/15 text-white' : 'tone-tile'}`}><Icon name={v.icon} size={19} /></div>
         <div className="min-w-0 flex-1">
-          <div className={`text-[11px] uppercase tracking-[0.13em] font-bold ${highlight ? 'text-white/70' : 'text-petrol'}`}>{v.label}{showTrip ? ` · ${showTrip}` : ''}</div>
+          <div className={`text-[11px] uppercase tracking-[0.13em] font-bold ${highlight ? 'text-white/75' : 'tone-ink'}`}>{v.label}{showTrip ? ` · ${showTrip}` : ''}</div>
           <div className={`font-semibold text-[16px] leading-snug mt-0.5 ${highlight ? '' : 'text-ink'}`}>{v.title}</div>
           {v.lines.filter(Boolean).map((l, i) => <div key={i} className={`text-[13.5px] leading-snug mt-0.5 ${sub}`}>{l}</div>)}
           {v.route && e.kind === 'main' && (
-            <div className={`mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] font-semibold ${highlight ? '' : 'text-petrol'}`}>
+            <div className={`mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] font-semibold ${highlight ? '' : 'tone-ink'}`}>
               <span><span className="font-bold">{code(d.from)}</span> <span className="tabular-nums">{a.start.slice(11, 16)}</span></span>
               <Icon name="arrow" size={14} className="opacity-60" />
               <span><span className="font-bold">{code(d.to)}</span> <span className="tabular-nums">{a.end ? a.end.slice(11, 16) : '–'}</span>{shift > 0 && <sup className="ml-0.5 text-[10px]">+{shift}</sup>}</span>
               {a.end && <span className={`flex items-center gap-1 text-[12px] font-normal ${sub}`}><Icon name="clock" size={12} />{durText(toUtc(a.end, a.endTz || a.startTz) - e.ms)}</span>}
             </div>
           )}
-          {(names.length > 0 || (e.kind === 'main' && (a.notes.length > 0 || a.attachments.length > 0))) && (
+          {(names.length > 0 || (e.kind === 'main' && (a.notes.length > 0 || docCount > 0))) && (
             <div className={`mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] ${sub}`}>
               {names.length > 0 && <span className="flex items-center gap-1.5"><Icon name="user" size={13} />{names.join(', ')}</span>}
               {a.notes.length > 0 && <span className="flex items-center gap-1.5" title="Notes"><Icon name="note" size={13} />{a.notes.length}</span>}
-              {a.attachments.length > 0 && <span className="flex items-center gap-1.5" title="Documents"><Icon name="clip" size={13} />{a.attachments.length}</span>}
+              {docCount > 0 && <span className="flex items-center gap-1.5" title="Documents"><Icon name="clip" size={13} />{docCount}</span>}
             </div>
           )}
         </div>
@@ -576,7 +589,7 @@ function EntryRow({ e, next, last, showTrip }: { e: Entry; next?: Entry; last?: 
       </div>
       <div className="relative w-3 shrink-0 flex justify-center">
         <div className={`absolute top-0 ${last ? 'h-6' : 'bottom-0'} w-px bg-petrol/30`} />
-        <div className={`relative mt-[20px] h-3 w-3 rounded-full border-2 ${isNext ? 'border-petrol bg-petrol ring-4 ring-petrol/25' : 'border-petrol bg-cream'}`} />
+        <div className={`relative mt-[20px] h-3 w-3 rounded-full border-2 tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot-ring'}`} />
       </div>
       <div className="flex-1 min-w-0 pb-3"><EntryCard e={e} highlight={isNext} showTrip={showTrip} /></div>
     </div>
@@ -683,14 +696,14 @@ function CalendarView({ entries, initialDate, ranges = [], tripNames }: { entrie
                 {trip && <div title={trip.name} className={`absolute left-0 right-0 bottom-0 h-[3px] ${other ? 'bg-cognac/20' : 'bg-cognac/50'}`} />}
                 <div className="hidden md:block space-y-1 mt-1">
                   {evs.slice(0, 3).map(e => (
-                    <button key={e.key} onClick={ev => { ev.stopPropagation(); ui.openActivity(e.a.id); }} className={`w-full flex items-center gap-1 truncate text-left text-[11.5px] rounded-md px-1.5 py-[3px] transition ${next && next.key === e.key ? 'bg-petrol-fill text-white' : 'bg-pale text-petrol hover:bg-petrol-fill hover:text-white'}`}>
+                    <button key={e.key} onClick={ev => { ev.stopPropagation(); ui.openActivity(e.a.id); }} className={`w-full flex items-center gap-1 truncate text-left text-[11.5px] rounded-md px-1.5 py-[3px] transition tone-${toneOf(e.a.type)} ${next && next.key === e.key ? 'tone-card-strong text-white' : 'tone-card tone-ink hover:brightness-125'}`}>
                       <span className="tabular-nums font-bold">{e.time}</span><span className="truncate">{entryView(e).title}</span>
                     </button>
                   ))}
                   {evs.length > 3 && <div className="text-[11px] text-muted px-1.5">+{evs.length - 3} more</div>}
                 </div>
                 <div className="md:hidden flex flex-wrap justify-center gap-[3px] mt-1">
-                  {evs.slice(0, 4).map(e => <span key={e.key} className="h-1.5 w-1.5 rounded-full bg-dot" />)}
+                  {evs.slice(0, 4).map(e => <span key={e.key} className={`h-1.5 w-1.5 rounded-full tone-dot tone-${toneOf(e.a.type)}`} />)}
                 </div>
               </div>
             );
@@ -713,8 +726,8 @@ function CalendarView({ entries, initialDate, ranges = [], tripNames }: { entrie
               </button>
               <div className="space-y-1.5">
                 {evs.map(e => (
-                  <button key={e.key} onClick={() => ui.openActivity(e.a.id)} className={`w-full text-left rounded-xl px-2.5 py-2 transition ${next && next.key === e.key ? 'bg-petrol-fill text-white' : 'bg-pale hover:bg-petrol/20'}`}>
-                    <div className={`flex items-center gap-1.5 text-[11.5px] font-bold tabular-nums ${next && next.key === e.key ? '' : 'text-petrol'}`}><Icon name={entryView(e).icon} size={13} />{e.time}{e.endTime ? '–' + e.endTime : ''}</div>
+                  <button key={e.key} onClick={() => ui.openActivity(e.a.id)} className={`w-full text-left rounded-xl px-2.5 py-2 transition tone-${toneOf(e.a.type)} ${next && next.key === e.key ? 'tone-card-strong text-white' : 'tone-card hover:brightness-125'}`}>
+                    <div className={`flex items-center gap-1.5 text-[11.5px] font-bold tabular-nums ${next && next.key === e.key ? '' : 'tone-ink'}`}><Icon name={entryView(e).icon} size={13} />{e.time}{e.endTime ? '–' + e.endTime : ''}</div>
                     <div className="text-[13px] leading-snug mt-0.5">{entryView(e).title}</div>
                   </button>
                 ))}
@@ -887,8 +900,7 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
   if (!trip) return <Empty icon="globe" title="Trip not found" text="This trip no longer exists." action={<button className="btn btn-primary" onClick={() => go('#/trips')}>Back to all trips</button>} />;
   const status = tripStatus(trip);
   const days = daysBetween(trip.start, trip.end) + 1;
-  const docs = acts.filter((a: Activity) => a.attachments.length).sort((a: Activity, b: Activity) => toUtc(a.start, a.startTz) - toUtc(b.start, b.startTz));
-  const docCount = docs.reduce((s: number, a: Activity) => s + a.attachments.length, 0);
+  const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id).length;
   const td = todayStr();
 
   return (
@@ -932,23 +944,7 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
 
       {tab === 'timeline' && <div className="max-w-3xl"><Timeline trip={trip} acts={acts} entries={entries} /></div>}
       {tab === 'calendar' && <CalendarView entries={entries} initialDate={td >= trip.start && td <= trip.end ? td : trip.start} ranges={[trip]} />}
-      {tab === 'documents' && (
-        <div className="max-w-3xl">
-          <div className="rounded-2xl bg-pale px-4 py-3 text-[13.5px] text-petrol flex gap-2.5 mb-6"><Icon name="clip" size={16} className="mt-0.5" /><span>Uploading, PDF viewing and offline access come in <strong>Phase 3</strong>. This shows how booking confirmations are collected per activity.</span></div>
-          {!docs.length ? <Empty icon="file" title="No documents" text="Documents are attached to individual activities and collected here." /> : (
-            <div className="space-y-5">
-              {docs.map((a: Activity) => (
-                <div key={a.id}>
-                  <button onClick={() => ui.openActivity(a.id)} className="flex flex-wrap items-center gap-2 text-[13px] mb-2 hover:underline text-left">
-                    <span className="text-cognac font-bold tabular-nums">{fmtShort(a.start.slice(0, 10))} · {a.start.slice(11, 16)}</span><span className="text-heading font-semibold">{a.title}</span>
-                  </button>
-                  <div className="space-y-2">{a.attachments.map(f => <DocRow key={f.id} f={f} />)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {tab === 'documents' && <TripDocuments trip={trip} acts={acts} entries={entries} />}
 
       {tab !== 'documents' && (
         <button onClick={() => ui.newActivity(trip.id)} aria-label="Add activity" className="md:hidden fixed right-5 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-30 h-14 w-14 rounded-full bg-primary text-white grid place-items-center shadow-lift active:scale-95 transition"><Icon name="plus" size={24} stroke={2} /></button>
@@ -957,16 +953,269 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
   );
 }
 
-function DocRow({ f }: { f: Attachment }) {
+/* =========================================================================
+   DOCUMENTS
+   ========================================================================= */
+const MAX_FILE = 50 * 1024 * 1024;
+const isTouch = () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+/** "Upload" and (on phones) "Take photo" buttons. Files are added to the trip and linked to `activityIds`. */
+function UploadButtons({ tripId, activityIds = [], onAdded, compact = false }: { tripId: string; activityIds?: string[]; onAdded?: (docs: Doc[]) => void; compact?: boolean }) {
+  const { addDocuments } = useStore();
   const ui = useUI();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const onPick = async (e: any) => {
+    const list: File[] = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!list.length) return;
+    const tooBig = list.filter(f => f.size > MAX_FILE);
+    const ok = list.filter(f => f.size <= MAX_FILE);
+    if (tooBig.length) ui.toast(`${tooBig[0].name} is larger than 50 MB and was skipped`);
+    if (!ok.length) return;
+    const docs = await addDocuments(tripId, ok, activityIds);
+    ui.toast(`${plural(docs.length, 'document', 'documents')} added`);
+    onAdded?.(docs);
+  };
+  const cls = compact ? 'text-[13px] font-semibold text-petrol flex items-center gap-1 hover:underline' : 'btn btn-primary h-10';
+  const cls2 = compact ? cls : 'btn btn-ghost h-10';
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-card border border-line px-3.5 py-3">
-      <div className="h-10 w-10 rounded-xl bg-cognac/12 text-cognac grid place-items-center shrink-0"><Icon name="file" size={18} /></div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-semibold text-ink truncate">{f.name}</div>
-        <div className="text-[12px] text-muted">{f.name.split('.').pop()!.toUpperCase()} · {Math.round(f.size / 1000)} KB</div>
+    <div className={`flex items-center ${compact ? 'gap-3.5' : 'gap-2'}`}>
+      <button className={cls} onClick={() => fileRef.current?.click()}><Icon name="upload" size={compact ? 14 : 16} />Upload</button>
+      {isTouch() && <button className={cls2} onClick={() => camRef.current?.click()}><Icon name="camera" size={compact ? 14 : 16} />Photo</button>}
+      <input ref={fileRef} type="file" multiple accept="application/pdf,image/*" className="hidden" onChange={onPick} />
+      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPick} />
+    </div>
+  );
+}
+
+function DocStatus({ d }: { d: Doc }) {
+  const { files, sync } = useStore();
+  const busy = files.busy[d.id];
+  if (busy) return <span className="flex items-center gap-1 text-petrol"><Icon name="refresh" size={11} className="animate-spin" />{busy === 'up' ? 'Uploading…' : 'Downloading…'}</span>;
+  if (!d.driveId) return <span className="text-cognac">{sync.connected ? 'Waiting to upload' : 'Only on this device'}</span>;
+  return files.localIds.has(d.id) ? <span className="flex items-center gap-1"><Icon name="check" size={11} />Offline</span> : <span>In Google Drive</span>;
+}
+
+function DocRow({ d, activityId, showStages = true }: { d: Doc; activityId?: string; showStages?: boolean }) {
+  const { data, deleteDoc, unlinkDoc } = useStore();
+  const ui = useUI();
+  const stages = showStages ? d.activityIds.map(id => data.activities.find((a: Activity) => a.id === id)).filter(Boolean) as Activity[] : [];
+  const menu = [
+    { label: 'Link to stages', icon: 'link', onClick: () => ui.chooseStages(d.tripId, [d.id], d.activityIds) },
+    ...(activityId ? [{ label: 'Remove from this stage', icon: 'x', onClick: () => { unlinkDoc(d.id, activityId); ui.toast('Removed from this stage. It’s still in the trip’s documents.'); } }] : []),
+    { label: 'Delete document', icon: 'trash', danger: true, onClick: () => ui.confirm({ title: 'Delete document?', text: `“${d.name}” is removed from the trip and all its stages, and moved to the Google Drive trash.`, ok: 'Delete', onOk: () => { deleteDoc(d.id); ui.toast('Document deleted'); } }) },
+  ];
+  return (
+    <div className="rounded-2xl bg-card border border-line px-3.5 py-3">
+      <div className="flex items-center gap-3">
+        <button onClick={() => ui.viewDoc(d.id)} className="h-10 w-10 rounded-xl bg-cognac/12 text-cognac grid place-items-center shrink-0" aria-label={`View ${d.name}`}><Icon name={isImage(d) ? 'image' : 'file'} size={18} /></button>
+        <button onClick={() => ui.viewDoc(d.id)} className="min-w-0 flex-1 text-left">
+          <div className="text-[14px] font-semibold text-ink truncate">{d.name}</div>
+          <div className="text-[12px] text-muted flex flex-wrap items-center gap-x-1.5">{isImage(d) ? 'Photo' : 'PDF'} · {fileSize(d.size)} · <DocStatus d={d} /></div>
+        </button>
+        <button onClick={() => ui.viewDoc(d.id)} className="btn btn-primary h-9 px-3.5 text-[13px]"><Icon name="eye" size={15} />View</button>
+        <Menu items={menu} />
       </div>
-      <button onClick={() => ui.toast('Document viewing comes in Phase 3.')} className="btn btn-primary h-9 px-3.5 text-[13px]"><Icon name="eye" size={15} /><span className="hidden sm:inline">View document</span><span className="sm:hidden">View</span></button>
+      {stages.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5 pl-[52px]">
+          {stages.map(a => (
+            <button key={a.id} onClick={() => ui.openActivity(a.id)} className={`tone-${toneOf(a.type)} tone-card inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold text-ink max-w-full`}>
+              <Icon name={TYPE_META[a.type].icon} size={12} className="tone-ink" /><span className="truncate">{fmtShort(a.start.slice(0, 10))} · {a.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TripDocuments({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
+  const { data, sync } = useStore();
+  const ui = useUI();
+  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === trip.id);
+  const actMs = (id: string) => { const a = acts.find(x => x.id === id); return a ? toUtc(a.start, a.startTz) : Infinity; };
+  const firstMs = (d: Doc) => Math.min(...d.activityIds.map(actMs));
+
+  // Documents for whatever happens in the next 24 hours (or is happening now)
+  const now = Date.now();
+  const soonIds = new Set(entries.filter(e => (e.ms >= now - 3600e3 && e.ms <= now + 24 * 3600e3) || (e.endMs && e.ms <= now && e.endMs >= now)).map(e => e.a.id));
+  const soon = docs.filter(d => d.activityIds.some(id => soonIds.has(id)));
+
+  const linked = docs.filter(d => d.activityIds.some(id => acts.some(a => a.id === id))).sort((a, b) => firstMs(a) - firstMs(b));
+  const general = docs.filter(d => !linked.includes(d));
+  const byDay: Record<string, Doc[]> = {};
+  linked.forEach(d => {
+    const a = acts.filter(x => d.activityIds.includes(x.id)).sort((x, y) => toUtc(x.start, x.startTz) - toUtc(y.start, y.startTz))[0];
+    const day = a.start.slice(0, 10);
+    (byDay[day] = byDay[day] || []).push(d);
+  });
+
+  const askStages = (added: Doc[]) => { if (acts.length) ui.chooseStages(trip.id, added.map(d => d.id), []); };
+
+  return (
+    <div className="max-w-3xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <p className="text-[13.5px] text-muted max-w-md">
+          {plural(docs.length, 'document', 'documents')}. Upload each file once and link it to its stages.{sync.connected ? ' Saved in Google Drive › My Travel Planner › Trips.' : ' Connect Google Drive in Settings to back them up.'}
+        </p>
+        <UploadButtons tripId={trip.id} onAdded={askStages} />
+      </div>
+
+      {!docs.length ? <Empty icon="file" title="No documents yet" text="Add tickets, boarding passes and hotel confirmations. Each file is uploaded once and can be linked to one or more stages." /> : (
+        <div className="space-y-8">
+          {soon.length > 0 && (
+            <section>
+              <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac mb-3 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-cognac pulse-dot" />Next 24 hours</h3>
+              <div className="space-y-2">{soon.map(d => <DocRow key={d.id} d={d} />)}</div>
+            </section>
+          )}
+          {Object.keys(byDay).sort().map(day => (
+            <section key={day}>
+              <h3 className="mb-3 flex items-baseline gap-2.5"><span className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac">{fmt(day, { weekday: 'long' })}</span><span className="font-display text-[19px] text-cognac">{fmtDM(day)}</span></h3>
+              <div className="space-y-2">{byDay[day].map(d => <DocRow key={d.id} d={d} />)}</div>
+            </section>
+          ))}
+          {general.length > 0 && (
+            <section>
+              <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-1">General</h3>
+              <p className="text-[12.5px] text-muted mb-3">Not linked to a stage, e.g. visa, insurance or passport copy.</p>
+              <div className="space-y-2">{general.map(d => <DocRow key={d.id} d={d} />)}</div>
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pick which stages a document belongs to (none = general trip document). */
+function StagePicker({ tripId, docIds, initial, onClose }: { tripId: string; docIds: string[]; initial: string[]; onClose: () => void }) {
+  const { data, setDocStages } = useStore();
+  const ui = useUI();
+  const [sel, setSel] = useState<string[]>(initial);
+  const acts = buildEntries(data.activities.filter((a: Activity) => a.tripId === tripId)).filter(e => e.kind === 'main').map(e => e.a);
+  const names = data.documents.filter((d: Doc) => docIds.includes(d.id)).map((d: Doc) => d.name);
+  const toggle = (id: string) => setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  return (
+    <Sheet onClose={onClose} label="Link to stages">
+      <SheetHead onClose={onClose} title="Which stages is this for?" eyebrow={<div className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac truncate">{names.length === 1 ? names[0] : plural(names.length, 'document', 'documents')}</div>}>
+        <p className="text-[13.5px] text-muted mt-1.5">Select one or more stages. Leave all unselected for a general trip document.</p>
+      </SheetHead>
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-1.5">
+        {acts.map(a => {
+          const on = sel.includes(a.id);
+          return (
+            <button key={a.id} onClick={() => toggle(a.id)} aria-pressed={on} className={`w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left border transition tone-${toneOf(a.type)} ${on ? 'tone-card' : 'border-transparent hover:bg-pale/60'}`}>
+              <span className={`h-6 w-6 rounded-lg border-2 grid place-items-center shrink-0 ${on ? 'bg-primary border-primary text-white' : 'border-line'}`}>{on && <Icon name="check" size={14} stroke={2.5} />}</span>
+              <span className="h-8 w-8 rounded-lg grid place-items-center tone-tile shrink-0"><Icon name={TYPE_META[a.type].icon} size={15} /></span>
+              <span className="min-w-0">
+                <span className="block text-[14.5px] font-semibold text-ink truncate">{a.title}</span>
+                <span className="block text-[12.5px] text-cognac font-semibold">{fmtShort(a.start.slice(0, 10))} · {a.start.slice(11, 16)}</span>
+              </span>
+            </button>
+          );
+        })}
+        {!acts.length && <p className="text-muted text-[14px] px-2">This trip has no stages yet.</p>}
+      </div>
+      <SheetFoot>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary flex-1" onClick={() => { setDocStages(docIds, sel); ui.toast(sel.length ? `Linked to ${plural(sel.length, 'stage', 'stages')}` : 'Saved as a general document'); onClose(); }}><Icon name="check" size={16} />Save</button>
+      </SheetFoot>
+    </Sheet>
+  );
+}
+
+/** Link documents already in the trip to one stage. */
+function ExistingDocPicker({ activity, onClose }: { activity: Activity; onClose: () => void }) {
+  const { data, linkDocs } = useStore();
+  const ui = useUI();
+  const [sel, setSel] = useState<string[]>([]);
+  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === activity.tripId && !d.activityIds.includes(activity.id));
+  return (
+    <Sheet onClose={onClose} label="Link existing document">
+      <SheetHead onClose={onClose} title="Link a trip document" eyebrow={<div className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac truncate">{activity.title}</div>} />
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-1.5">
+        {docs.map(d => {
+          const on = sel.includes(d.id);
+          return (
+            <button key={d.id} onClick={() => setSel(s => on ? s.filter(x => x !== d.id) : [...s, d.id])} aria-pressed={on} className={`w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-left border transition ${on ? 'bg-pale border-petrol/40' : 'border-transparent hover:bg-pale/60'}`}>
+              <span className={`h-6 w-6 rounded-lg border-2 grid place-items-center shrink-0 ${on ? 'bg-primary border-primary text-white' : 'border-line'}`}>{on && <Icon name="check" size={14} stroke={2.5} />}</span>
+              <Icon name={isImage(d) ? 'image' : 'file'} size={18} className="text-cognac" />
+              <span className="min-w-0 text-[14.5px] font-semibold text-ink truncate">{d.name}</span>
+            </button>
+          );
+        })}
+        {!docs.length && <Empty icon="file" title="Nothing to link" text="All of this trip’s documents are already linked here, or the trip has none yet. Use Upload instead." />}
+      </div>
+      <SheetFoot>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary flex-1" disabled={!sel.length} onClick={() => { linkDocs(sel, activity.id); ui.toast(`${plural(sel.length, 'document', 'documents')} linked`); onClose(); }}><Icon name="link" size={16} />Link</button>
+      </SheetFoot>
+    </Sheet>
+  );
+}
+
+/** Full-screen viewer for PDFs and photos, from this device or Google Drive. */
+function DocViewer({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data, files } = useStore();
+  const d: Doc | undefined = data.documents.find((x: Doc) => x.id === id);
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [err, setErr] = useState('');
+  const [pages, setPages] = useState(0);
+  const [url, setUrl] = useState('');
+  const pdfRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    scrollLocks++; document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', h); scrollLocks--; if (!scrollLocks) document.body.style.overflow = ''; };
+  }, []);
+  useEffect(() => { if (d) files.getBlob(d).then(setBlob).catch((e: any) => setErr(e.message)); }, [id]);
+  useEffect(() => {
+    if (!blob) return;
+    const u = URL.createObjectURL(blob); setUrl(u);
+    let cancelled = false;
+    if (d && !isImage(d) && pdfRef.current) {
+      const el = pdfRef.current;
+      el.innerHTML = '';
+      renderPdf(blob, el, Math.min(el.clientWidth - 8, 900), () => cancelled).then(setPages).catch(() => setErr('This PDF couldn’t be displayed. Use “Open” to view it in another app.'));
+    }
+    return () => { cancelled = true; URL.revokeObjectURL(u); };
+  }, [blob]);
+
+  if (!d) return null;
+  const share = async () => {
+    if (!blob) return;
+    const file = new File([blob], d.name, { type: d.mime });
+    try {
+      if ((navigator as any).canShare?.({ files: [file] })) { await (navigator as any).share({ files: [file], title: d.name }); return; }
+    } catch { return; }
+    const a = document.createElement('a'); a.href = url; a.download = d.name; a.click();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-[#06090a]/95 flex flex-col anim-fade" role="dialog" aria-modal="true" aria-label={d.name}>
+      <div className="flex items-center gap-2 px-3 sm:px-5 pt-[calc(env(safe-area-inset-top,0px)+10px)] pb-2.5 border-b border-white/10 text-white">
+        <button onClick={onClose} aria-label="Close" className="h-10 w-10 grid place-items-center rounded-full hover:bg-white/10"><Icon name="x" /></button>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14.5px] font-semibold truncate">{d.name}</div>
+          <div className="text-[12px] text-white/55">{isImage(d) ? 'Photo' : pages ? plural(pages, 'page', 'pages') : 'PDF'} · {fileSize(d.size)}</div>
+        </div>
+        {blob && <button onClick={share} className="btn h-9 px-3.5 text-[13px] bg-white/10 text-white hover:bg-white/20"><Icon name="upload" size={15} />{isTouch() ? 'Share / Save' : 'Download'}</button>}
+        {blob && !isTouch() && <a href={url} target="_blank" rel="noopener" className="btn h-9 px-3.5 text-[13px] bg-white/10 text-white hover:bg-white/20"><Icon name="eye" size={15} />Open</a>}
+      </div>
+      <div className="flex-1 overflow-auto px-3 py-4 sm:p-6" style={{ touchAction: 'pan-x pan-y pinch-zoom' }}>
+        {err ? (
+          <div className="max-w-sm mx-auto mt-20 text-center text-white/80"><Icon name="cloud" size={28} className="mx-auto text-white/50" /><p className="mt-3 text-[15px]">{err}</p></div>
+        ) : !blob ? (
+          <div className="mt-24 flex flex-col items-center gap-3 text-white/70"><Icon name="refresh" size={24} className="animate-spin" /><span className="text-[14px]">Loading document…</span></div>
+        ) : isImage(d) ? (
+          <img src={url} alt={d.name} className="mx-auto max-w-full h-auto rounded-md" />
+        ) : null}
+        <div ref={pdfRef} className={`space-y-4 ${blob && !isImage(d) && !err ? '' : 'hidden'}`} />
+      </div>
     </div>
   );
 }
@@ -1201,6 +1450,7 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const endTz = a.endTz || a.startTz;
   const contacts = a.contactIds.map(cid => data.contacts.find((c: Contact) => c.id === cid)).filter(Boolean) as Contact[];
   const isRoute = a.type === 'flight' || a.type === 'train';
+  const linkedDocs = data.documents.filter((d: Doc) => d.activityIds.includes(a.id));
 
   let when = `${fmtLong(a.start.slice(0, 10))} · ${a.start.slice(11, 16)}`;
   if (a.type === 'hotel' && a.end) {
@@ -1226,8 +1476,8 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
     <Sheet onClose={onClose} label={a.title}>
       <SheetHead onClose={onClose} title={a.title} eyebrow={
         <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-pale text-petrol grid place-items-center"><Icon name={meta.icon} size={18} /></div>
-          <div className="text-[11.5px] font-bold uppercase tracking-[0.13em] text-petrol">{meta.label}{trip ? <span className="text-muted font-medium normal-case tracking-normal"> · {trip.name}</span> : null}</div>
+          <div className={`h-9 w-9 rounded-xl grid place-items-center tone-tile tone-${toneOf(a.type)}`}><Icon name={meta.icon} size={18} /></div>
+          <div className={`text-[11.5px] font-bold uppercase tracking-[0.13em] tone-ink tone-${toneOf(a.type)}`}>{meta.label}{trip ? <span className="text-muted font-medium normal-case tracking-normal"> · {trip.name}</span> : null}</div>
         </div>
       }>
         <div className="mt-1.5 text-[14.5px] font-semibold text-cognac">{when}</div>
@@ -1235,7 +1485,7 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
       <div className="flex-1 overflow-y-auto px-5 sm:px-7 py-6 space-y-7">
         {isRoute && (
-          <div className="rounded-3xl bg-pale p-5">
+          <div className="rounded-3xl p-5 tone-card tone-transport">
             <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3">
               <div className="min-w-0">
                 <div className="text-[11px] font-bold uppercase tracking-[0.13em] text-petrol">Departure</div>
@@ -1316,9 +1566,13 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
         <NotesSection a={a} />
 
         <section>
-          <SectionTitle icon="clip" action={<button onClick={() => ui.toast('Document upload comes in Phase 3.')} className="text-[13px] font-semibold text-petrol flex items-center gap-1 hover:underline"><Icon name="upload" size={14} />Upload</button>}>Documents</SectionTitle>
-          {a.attachments.length ? <div className="space-y-2">{a.attachments.map(f => <DocRow key={f.id} f={f} />)}</div>
-            : <div className="text-[14px] text-muted">No documents attached yet.</div>}
+          <SectionTitle icon="clip">Documents</SectionTitle>
+          {linkedDocs.length ? <div className="space-y-2">{linkedDocs.map((d: Doc) => <DocRow key={d.id} d={d} activityId={a.id} showStages={false} />)}</div>
+            : <div className="text-[14px] text-muted">No documents for this stage yet.</div>}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-2">
+            <UploadButtons tripId={a.tripId} activityIds={[a.id]} compact />
+            <button onClick={() => ui.linkExisting(a)} className="text-[13px] font-semibold text-petrol flex items-center gap-1 hover:underline"><Icon name="link" size={14} />Link from trip documents</button>
+          </div>
         </section>
       </div>
 
@@ -1452,7 +1706,7 @@ function ActivityForm({ init, onClose }: { init: { tripId: string; activity?: Ac
     const sameDay = others.find((a: Activity) => a.start.slice(0, 10) === date);
     const prior = others.filter((a: Activity) => a.start.slice(0, 10) < date).pop();
     const tz = sameDay ? sameDay.startTz : prior ? (prior.endTz || prior.startTz) : others[0] ? others[0].startTz : 'Europe/Berlin';
-    return { id: uid(), tripId: init.tripId, type: 'meeting', title: '', start: date + 'T09:00', startTz: tz, end: '', endTz: tz, city: (sameDay || prior)?.city || '', location: '', details: {}, contactIds: [], notes: [], tasks: [], attachments: [] };
+    return { id: uid(), tripId: init.tripId, type: 'meeting', title: '', start: date + 'T09:00', startTz: tz, end: '', endTz: tz, city: (sameDay || prior)?.city || '', location: '', details: {}, contactIds: [], notes: [], tasks: [] };
   });
   const [firstNote, setFirstNote] = useState('');
   const [err, setErr] = useState('');
@@ -1676,6 +1930,9 @@ export function App() {
   const [contactForm, setContactForm] = useState<any>(undefined);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<any>(null);
+  const [viewDocId, setViewDocId] = useState<string | null>(null);
+  const [stagePick, setStagePick] = useState<any>(null);
+  const [existingFor, setExistingFor] = useState<Activity | null>(null);
   const toastTimer = useRef<any>(null);
 
   const ui = useMemo(() => ({
@@ -1684,6 +1941,9 @@ export function App() {
     editActivity: (a: Activity) => setActForm({ tripId: a.tripId, activity: a }),
     editTrip: (t: Trip | null) => setTripForm(t),
     openContact: (id: string) => setContactId(id),
+    viewDoc: (id: string) => setViewDocId(id),
+    chooseStages: (tripId: string, docIds: string[], initial: string[]) => setStagePick({ tripId, docIds, initial }),
+    linkExisting: (a: Activity) => setExistingFor(a),
     editContact: (c: Contact | null) => setContactForm(c),
     confirm: (s: any) => setConfirmState(s),
     toast: (m: string) => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(null), 2600); },
@@ -1749,6 +2009,9 @@ export function App() {
 
       {activityId && <ActivityDetail id={activityId} onClose={() => setActivityId(null)} />}
       {contactId && <ContactDetail id={contactId} onClose={() => setContactId(null)} />}
+      {stagePick && <StagePicker {...stagePick} onClose={() => setStagePick(null)} />}
+      {existingFor && <ExistingDocPicker activity={existingFor} onClose={() => setExistingFor(null)} />}
+      {viewDocId && <DocViewer id={viewDocId} onClose={() => setViewDocId(null)} />}
       {actForm && <ActivityForm init={actForm} onClose={() => setActForm(null)} />}
       {tripForm !== undefined && <TripForm trip={tripForm} onClose={() => setTripForm(undefined)} />}
       {contactForm !== undefined && <ContactForm contact={contactForm} onClose={() => setContactForm(undefined)} />}

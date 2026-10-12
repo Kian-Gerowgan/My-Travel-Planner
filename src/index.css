@@ -10,6 +10,11 @@
     --petrol: 92 196 240; --petrolfill: 22 118 168; --pale: 21 41 52; --cream: 14 20 18;
     --ink: 231 233 229; --card: 22 30 27; --muted: 146 157 152; --line: 40 51 48; --danger: 232 132 116;
     --dot: 92 196 240;
+    --transport: 40 104 190; --transport-ink: 142 192 250;
+    --hotel: 170 100 44; --hotel-ink: 238 178 124;
+    --meeting: 160 34 116; --meeting-ink: 242 134 204;
+    --personal: 110 128 122; --personal-ink: 178 196 190;
+    --ta1: .52; --ta2: .10; --tb: .38;
     color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
@@ -18,6 +23,8 @@
       --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
       --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
       --dot: 30 128 178;
+      --transport-ink: 28 86 165; --hotel-ink: 145 82 28; --meeting-ink: 148 28 104; --personal-ink: 82 98 92;
+      --ta1: .20; --ta2: .04; --tb: .28;
       color-scheme: light;
     }
   }
@@ -26,6 +33,8 @@
     --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
     --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
     --dot: 30 128 178;
+    --transport-ink: 28 86 165; --hotel-ink: 145 82 28; --meeting-ink: 148 28 104; --personal-ink: 82 98 92;
+    --ta1: .20; --ta2: .04; --tb: .28;
     color-scheme: light;
   }
   html, body { background: rgb(var(--cream)); color: rgb(var(--ink)); }
@@ -58,3 +67,17 @@
   .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 }
+
+/* Stage colour families: a tinted, fading card per category.
+   Kept outside @layer so Tailwind doesn't drop the dynamically chosen tone-* classes. */
+.tone-transport { --tc: var(--transport); --ti: var(--transport-ink); }
+.tone-hotel { --tc: var(--hotel); --ti: var(--hotel-ink); }
+.tone-meeting { --tc: var(--meeting); --ti: var(--meeting-ink); }
+.tone-personal { --tc: var(--personal); --ti: var(--personal-ink); }
+.tone-card { background: linear-gradient(125deg, rgb(var(--tc) / var(--ta1)) 0%, rgb(var(--tc) / var(--ta2)) 85%); border: 1px solid rgb(var(--tc) / var(--tb)); }
+.tone-card-strong { background: linear-gradient(125deg, rgb(var(--tc) / .95) 0%, rgb(var(--tc) / .55) 100%); border: 1px solid rgb(var(--ti) / .55); box-shadow: 0 0 0 3px rgb(var(--ti) / .18), 0 12px 36px rgb(0 0 0 / .32); }
+.tone-ink { color: rgb(var(--ti)); }
+.tone-tile { background: rgb(var(--tc) / .28); color: rgb(var(--ti)); }
+.tone-dot { background: rgb(var(--ti)); }
+.tone-dot-ring { border-color: rgb(var(--ti)); background: rgb(var(--cream)); }
+.tone-dot-fill { border-color: rgb(var(--ti)); background: rgb(var(--ti)); box-shadow: 0 0 0 4px rgb(var(--ti) / .25); }

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as drive from './drive';
 
 type Item = { id: string };
-export interface SyncData { trips: Item[]; activities: Item[]; contacts: Item[]; sample?: boolean; [k: string]: any }
+export interface SyncData { trips: Item[]; activities: Item[]; contacts: Item[]; documents?: Item[]; sample?: boolean; [k: string]: any }
 
 export type SyncStatus = 'off' | 'idle' | 'syncing' | 'needs-auth' | 'offline' | 'error';
 export interface SyncState { status: SyncStatus; lastSync?: number; error?: string; }
@@ -24,9 +24,9 @@ const META_KEY = 'mtp:sync:v1';
 const loadMeta = (): Meta => { try { return JSON.parse(localStorage.getItem(META_KEY) || '') || { connected: false }; } catch { return { connected: false }; } };
 const saveMeta = (m: Meta) => { try { localStorage.setItem(META_KEY, JSON.stringify(m)); } catch { /* storage unavailable */ } };
 
-const strip = (d: SyncData): SyncData => ({ version: d.version, trips: d.trips || [], activities: d.activities || [], contacts: d.contacts || [] });
-const canon = (d?: SyncData) => (d ? JSON.stringify([d.trips, d.activities, d.contacts]) : '');
-const EMPTY: SyncData = { trips: [], activities: [], contacts: [] };
+const strip = (d: SyncData): SyncData => ({ version: d.version, trips: d.trips || [], activities: d.activities || [], contacts: d.contacts || [], documents: d.documents || [] });
+const canon = (d?: SyncData) => (d ? JSON.stringify([d.trips, d.activities, d.contacts, d.documents || []]) : '');
+const EMPTY: SyncData = { trips: [], activities: [], contacts: [], documents: [] };
 const today = () => new Date().toISOString().slice(0, 10);
 
 function mergeList(base: Item[], local: Item[], remote: Item[]) {
@@ -50,7 +50,8 @@ function merge(base: SyncData, local: SyncData, remote: SyncData) {
   const t = mergeList(base.trips, local.trips, remote.trips);
   const a = mergeList(base.activities, local.activities, remote.activities);
   const c = mergeList(base.contacts, local.contacts, remote.contacts);
-  return { data: { ...strip(remote), trips: t.list, activities: a.list, contacts: c.list }, conflicts: t.conflicts + a.conflicts + c.conflicts };
+  const d = mergeList(base.documents || [], local.documents || [], remote.documents || []);
+  return { data: { ...strip(remote), trips: t.list, activities: a.list, contacts: c.list, documents: d.list }, conflicts: t.conflicts + a.conflicts + c.conflicts + d.conflicts };
 }
 
 export function useDriveSync(data: SyncData, replaceData: (d: SyncData) => void) {
@@ -178,7 +179,7 @@ export function useDriveSync(data: SyncData, replaceData: (d: SyncData) => void)
   }, [data, pending, run]);
 
   return useMemo(() => ({
-    ...state, pending, connected: meta.current.connected,
+    ...state, pending, connected: meta.current.connected, folderId: meta.current.folderId,
     syncNow: () => run(true), connect, disconnect,
     choice, notice, clearNotice: () => setNotice(null),
   }), [state, pending, run, connect, disconnect, choice, notice]);
