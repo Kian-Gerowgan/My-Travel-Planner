@@ -1959,7 +1959,7 @@ export function App() {
           <div className="flex items-center gap-2.5">
             <div className="h-9 w-9 rounded-xl bg-white/10 grid place-items-center text-[#E8BB91]"><Icon name="compass" size={19} /></div>
             <div>
-              <div className="font-display text-[17px] leading-none">My Travel Planner</div>
+              <div className="font-display text-[18.7px] leading-none">My Travel Planner</div>
               <div className="text-[10.5px] uppercase tracking-[0.18em] text-white/50 mt-1.5 font-semibold">Travel organizer</div>
             </div>
           </div>
@@ -1982,7 +1982,7 @@ export function App() {
       <div className="lg:hidden flex items-center justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] pb-1">
         <a href="#/trips" className="flex items-center gap-2 text-heading">
           <Icon name="compass" size={18} className="text-cognac" />
-          <span className="font-display text-[16px]">My Travel Planner</span>
+          <span className="font-display text-[17.6px]">My Travel Planner</span>
         </a>
         <SyncBadge />
       </div>
