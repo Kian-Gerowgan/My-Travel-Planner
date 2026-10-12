@@ -63,6 +63,7 @@ const TIMEZONES = [
   { id: 'Asia/Shanghai', label: 'China (Shanghai)', city: 'China' },
   { id: 'Asia/Hong_Kong', label: 'Hong Kong', city: 'Hong Kong' },
   { id: 'Asia/Singapore', label: 'Singapore', city: 'Singapore' },
+  { id: 'Asia/Ho_Chi_Minh', label: 'Vietnam (Ho Chi Minh City)', city: 'Vietnam' },
   { id: 'Asia/Makassar', label: 'Indonesia (Bali)', city: 'Bali' },
   { id: 'Asia/Tokyo', label: 'Japan (Tokyo)', city: 'Tokyo' },
   { id: 'Asia/Kolkata', label: 'India', city: 'India' },
