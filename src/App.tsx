@@ -774,10 +774,10 @@ function PageHead({ eyebrow, title, action }: { eyebrow?: string; title: string;
   return (
     <div className="mb-7">
       {eyebrow && <div className="text-[10px] sm:text-[12.5px] -mt-[5px] sm:mt-0 font-bold uppercase tracking-[0.16em] text-cognac mb-[36px] sm:mb-1.5">{eyebrow}</div>}
-      {/* Title and page action share one row, centred on each other */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="font-display text-[32px] sm:text-[38px] leading-[1.08] text-heading">{title}</h1>
-        {action}
+      {/* Title and page action share one row: buttons as tall as the title line, bottom-aligned, with a thin blue rule below */}
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-3 border-b border-petrol/60">
+        <h1 className="font-display text-[32px] sm:text-[38px] leading-[34px] sm:leading-[41px] text-heading">{title}</h1>
+        {action && <div className="[&_.btn]:h-[34px] sm:[&_.btn]:h-[41px] [&_.btn]:px-3.5 [&_.btn]:text-[13.5px]">{action}</div>}
       </div>
     </div>
   );
