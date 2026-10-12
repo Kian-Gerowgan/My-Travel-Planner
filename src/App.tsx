@@ -1988,7 +1988,7 @@ export function App() {
       </div>
 
       <main className="lg:pl-64">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-10 pt-5 lg:pt-12 pb-32 lg:pb-16">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-10 pt-[10px] sm:pt-5 lg:pt-12 pb-32 lg:pb-16">
           {route.page === 'trips' && <TripsPage />}
           {route.page === 'trip' && <TripPage id={route.id} tab={route.tab} />}
           {route.page === 'calendar' && <CalendarPage />}
