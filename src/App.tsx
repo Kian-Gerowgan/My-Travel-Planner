@@ -772,12 +772,13 @@ function CalendarView({ entries, initialDate, ranges = [], tripNames }: { entrie
    ========================================================================= */
 function PageHead({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: any }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
-      <div>
-        {eyebrow && <div className="text-[10px] sm:text-[12.5px] -mt-[5px] sm:mt-0 font-bold uppercase tracking-[0.16em] text-cognac mb-[36px] sm:mb-1.5">{eyebrow}</div>}
+    <div className="mb-7">
+      {eyebrow && <div className="text-[10px] sm:text-[12.5px] -mt-[5px] sm:mt-0 font-bold uppercase tracking-[0.16em] text-cognac mb-[36px] sm:mb-1.5">{eyebrow}</div>}
+      {/* Title and page action share one row, centred on each other */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-display text-[32px] sm:text-[38px] leading-[1.08] text-heading">{title}</h1>
+        {action}
       </div>
-      {action}
     </div>
   );
 }
