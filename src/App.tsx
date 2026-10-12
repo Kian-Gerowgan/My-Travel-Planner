@@ -452,7 +452,7 @@ function Sheet({ onClose, children, label }: { onClose: () => void; children: an
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-stretch md:justify-end" role="dialog" aria-modal="true" aria-label={label}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px] anim-fade" onClick={onClose} />
-      <div className="relative w-full md:w-[540px] max-h-[94vh] md:max-h-none md:h-full bg-cream rounded-t-[28px] md:rounded-none md:rounded-l-[28px] shadow-lift flex flex-col overflow-hidden anim-sheet border-t md:border-t-0 md:border-l border-line">
+      <div className="relative w-full md:w-[540px] max-h-[calc(100dvh-env(safe-area-inset-top,0px)-12px)] md:max-h-none md:h-full bg-cream rounded-t-[28px] md:rounded-none md:rounded-l-[28px] shadow-lift flex flex-col overflow-hidden anim-sheet border-t md:border-t-0 md:border-l border-line">
         {children}
       </div>
     </div>
@@ -1977,7 +1977,9 @@ export function App() {
       </aside>
 
       {/* Mobile brand bar */}
-      <div className="lg:hidden flex items-center justify-between px-4 pt-[14px] pb-1">
+      {/* Solid strip behind the iPhone status bar (clock, battery) so scrolling content doesn't run under it */}
+      <div className="lg:hidden fixed top-0 inset-x-0 z-[45] bg-cream h-[env(safe-area-inset-top,0px)]" aria-hidden="true" />
+      <div className="lg:hidden flex items-center justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] pb-1">
         <a href="#/trips" className="flex items-center gap-2 text-heading">
           <Icon name="compass" size={18} className="text-cognac" />
           <span className="font-display text-[16px]">My Travel Planner</span>
