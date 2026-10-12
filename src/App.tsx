@@ -1108,7 +1108,6 @@ function TripsPage() {
 
   return (
     <div>
-      <SyncReminder />
       <section className="mb-8">
         <div className="flex items-baseline justify-between mb-3">
           <h2 className="text-[12.5px] font-bold uppercase tracking-[0.24em] text-muted">Next up</h2>
@@ -1274,7 +1273,7 @@ function DocStatus({ d }: { d: Doc }) {
   const { files, sync } = useStore();
   const busy = files.busy[d.id];
   if (busy) return <span className="flex items-center gap-1 text-petrol"><Icon name="refresh" size={11} className="animate-spin" />{busy === 'up' ? 'Uploading…' : 'Downloading…'}</span>;
-  if (!d.driveId) return <span className="text-cognac">{sync.connected ? 'Waiting to upload' : 'Only on this device'}</span>;
+  if (!d.driveId) return <span className="text-cognac">{!sync.connected ? 'Only on this device' : sync.status === 'needs-auth' ? 'Waiting – tap the cloud icon to upload' : sync.status === 'offline' ? 'Waiting – uploads when online' : 'Waiting to upload'}</span>;
   return files.localIds.has(d.id) ? <span className="flex items-center gap-1"><Icon name="check" size={11} />Offline</span> : <span>In Google Drive</span>;
 }
 
@@ -2346,6 +2345,7 @@ export function App() {
 
       <main className="lg:pl-64">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-10 pt-[10px] sm:pt-5 lg:pt-12 pb-32 lg:pb-16">
+          <SyncReminder />
           {route.page === 'trips' && <TripsPage />}
           {route.page === 'trip' && <TripPage id={route.id} tab={route.tab} />}
           {route.page === 'calendar' && <CalendarPage />}
