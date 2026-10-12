@@ -95,6 +95,9 @@
 .tone-press:hover { filter: brightness(1.12); }
 .tone-press:active { transform: scale(.985); }
 
+/* Next up hero: stronger colour on the left, calm border, no glow ring */
+.tone-hero { background: linear-gradient(100deg, rgb(var(--tc) / .55) 0%, rgb(var(--tc) / .22) 50%, rgb(var(--tc) / .06) 100%); border-color: rgb(var(--th) / .5); box-shadow: 0 14px 34px -18px rgb(var(--tc) / .8); }
+
 /* Cognac call-to-action (New trip) */
 .btn-cognac { background: linear-gradient(90deg, #B9783F, #D99A60); color: #fff; box-shadow: 0 8px 22px -8px rgb(185 120 63 / .65); }
 .btn-cognac:hover { filter: brightness(1.06); }

@@ -569,12 +569,12 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
       className={`tone-press w-full flex items-center gap-2.5 rounded-[18px] pl-2 pr-2.5 py-2 text-left tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
       <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0"><Icon name={v.icon} size={17} /></span>
       <span className="w-[40px] shrink-0 leading-tight">
-        <span className="block tone-ink text-[14.5px] font-semibold tabular-nums">{e.time}</span>
+        <span className="block tone-ink text-[14.5px] font-medium tabular-nums">{e.time}</span>
         {e.endTime && <span className="block tone-ink opacity-70 text-[11.5px] tabular-nums">{e.endTime}</span>}
       </span>
       <span className="w-px self-stretch my-0.5 bg-white/15" />
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-semibold text-ink truncate">{v.title}</span>
+        <span className="block text-[15px] font-medium text-ink truncate">{v.title}</span>
         {sub && <span className="block text-[12.5px] tone-ink opacity-90 truncate">{sub}</span>}
       </span>
       {(docCount > 0 || a.notes.length > 0) && e.kind === 'main' && (
@@ -841,7 +841,7 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
           <div className="flex items-start justify-between gap-2">
             <button onClick={open} className="text-left min-w-0 pt-1">
               <div className="text-[12px] font-bold tracking-[0.14em] text-cognac tabular-nums">{rangeCaps(trip.start, trip.end)}</div>
-              <h3 className="font-display text-[19px] sm:text-[21px] leading-tight text-heading mt-1">{trip.name}</h3>
+              <h3 className="text-[19px] sm:text-[21px] font-medium leading-tight tracking-[-0.01em] text-heading mt-1">{trip.name}</h3>
             </button>
             <div className="-mr-1 -mt-0.5 shrink-0">
               <Menu items={[
@@ -881,7 +881,7 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
                   <div className={`absolute ${i === 0 ? 'top-1/2' : 'top-0'} ${i === preview.length - 1 ? 'bottom-1/2' : 'bottom-0'} border-l border-dashed border-white/20`} />
                   <div className={`relative self-center h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
                 </div>
-                <div className="py-1 min-w-0"><EntryCard e={e} highlight={isNext} /></div>
+                <div className="py-1 min-w-0"><EntryCard e={e} /></div>
               </div>
             );
           })}
@@ -909,13 +909,13 @@ function NextUp() {
   const where = [e.a.city || (e.a.type === 'flight' || e.a.type === 'train' ? place(e.a.details.from) : ''), trip?.countries[0]].filter(Boolean).join(' · ');
   const when = e.ms <= Date.now() ? 'Happening now' : relText(e) === 'tomorrow' ? 'Tomorrow' : relText(e).replace(/^in /, 'In ');
   return (
-    <button onClick={() => ui.openActivity(e.a.id)} className={`tone-press anim-in relative w-full overflow-hidden text-left rounded-[26px] p-5 tone-${tone} tone-card-strong`}>
+    <button onClick={() => ui.openActivity(e.a.id)} className={`tone-press anim-in relative w-full overflow-hidden text-left rounded-[26px] p-5 tone-${tone} tone-card tone-hero`}>
       <Icon name={TYPE_META[e.a.type].icon} size={150} stroke={1} className="absolute -right-6 -top-5 opacity-[0.10] text-white pointer-events-none" />
       <div className="relative text-[12px] font-bold uppercase tracking-[0.24em] tone-ink">{when}</div>
       <div className="relative mt-2.5 flex items-center gap-4">
         <span className="tone-icon h-14 w-14 rounded-full grid place-items-center shrink-0"><Icon name={v.icon} size={24} /></span>
         <div className="min-w-0 flex-1">
-          <div className="font-display text-[21px] sm:text-[23px] leading-tight text-white">{v.title}</div>
+          <div className="text-[21px] sm:text-[23px] font-medium leading-tight tracking-[-0.01em] text-white">{v.title}</div>
           <div className="text-[14.5px] text-white/75 mt-1">{fmtShort(e.date)} · {e.time}{e.endTime ? '–' + e.endTime : ''}</div>
           {where && <div className="text-[14.5px] text-white/75">{where}</div>}
         </div>
@@ -958,7 +958,7 @@ function TripsPage() {
       </section>
 
       <div className="flex items-center justify-between gap-3 mb-4">
-        <h1 className="font-display text-[32px] sm:text-[36px] leading-none text-heading">My Trips</h1>
+        <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.02em] leading-none text-heading">My Trips</h1>
         <button className="btn btn-cognac h-11 px-5" onClick={() => ui.editTrip(null)}><Icon name="plus" size={18} />New trip</button>
       </div>
 
@@ -2136,7 +2136,7 @@ export function App() {
         <a href="#/trips" className="flex items-center gap-3 min-w-0">
           <AppLogo size={46} />
           <span className="min-w-0">
-            <span className="block font-display text-[20px] leading-tight text-heading truncate">My Travel Planner</span>
+            <span className="block text-[20px] font-medium leading-tight tracking-[-0.01em] text-heading truncate">My Travel Planner</span>
             <span className="block text-[12.5px] text-muted">Plan. Organize. Explore.</span>
           </span>
         </a>
