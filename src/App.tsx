@@ -1984,7 +1984,7 @@ export function App() {
       <div className="lg:hidden flex items-center justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] pb-1">
         <a href="#/trips" className="flex items-center gap-2 text-heading">
           <Icon name="compass" size={18} className="text-cognac" />
-          <span className="font-display text-[18px]">My Travel Planner</span>
+          <span className="font-display text-[20px]">My Travel Planner</span>
         </a>
         <SyncBadge />
       </div>
