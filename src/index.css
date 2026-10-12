@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Layout: dark forest shell, cognac dates, petrol-blue stations on a vertical timeline.
+     Dark is the default look; light stays available in Settings. */
+  :root {
+    --nav: 19 45 39; --primary: 46 110 92; --heading: 214 232 224; --cognac: 216 161 112;
+    --petrol: 92 196 240; --petrolfill: 22 118 168; --pale: 21 41 52; --cream: 14 20 18;
+    --ink: 231 233 229; --card: 22 30 27; --muted: 146 157 152; --line: 40 51 48; --danger: 232 132 116;
+    --dot: 92 196 240;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --nav: 25 61 53; --primary: 25 61 53; --heading: 25 61 53; --cognac: 176 112 60;
+      --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
+      --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
+      --dot: 30 128 178;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --nav: 25 61 53; --primary: 25 61 53; --heading: 25 61 53; --cognac: 176 112 60;
+    --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
+    --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
+    --dot: 30 128 178;
+    color-scheme: light;
+  }
+  html, body { background: rgb(var(--cream)); color: rgb(var(--ink)); }
+  body { margin: 0; font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+  .font-display { font-weight: 650; letter-spacing: -0.025em; }
+  h1, h2, h3 { text-wrap: balance; }
+  .inp { width: 100%; border-radius: 12px; border: 1px solid rgb(var(--line)); background: rgb(var(--card)); padding: 10px 12px; font-size: 16px; color: rgb(var(--ink)); transition: border-color .15s, box-shadow .15s; font-family: inherit; }
+  .inp::placeholder { color: rgb(var(--muted) / .65); }
+  .inp:focus { outline: none; border-color: rgb(var(--petrol)); box-shadow: 0 0 0 3px rgb(var(--petrol) / .18); }
+  textarea.inp { min-height: 88px; resize: vertical; line-height: 1.5; }
+  .lbl { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--muted)); margin-bottom: 6px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 18px; border-radius: 999px; font-weight: 600; font-size: 14.5px; transition: background .15s, transform .1s, box-shadow .15s; white-space: nowrap; }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: rgb(var(--primary)); color: #fff; box-shadow: 0 4px 14px rgb(var(--primary) / .3); }
+  .btn-primary:hover { background: rgb(var(--primary) / .9); }
+  .btn-ghost { background: rgb(var(--card)); color: rgb(var(--heading)); border: 1px solid rgb(var(--line)); }
+  .btn-ghost:hover { background: rgb(var(--pale) / .7); }
+  .btn-danger { background: transparent; color: rgb(var(--danger)); border: 1px solid rgb(var(--danger) / .35); }
+  .btn-danger:hover { background: rgb(var(--danger) / .1); }
+  :focus-visible { outline: 2px solid rgb(var(--petrol)); outline-offset: 2px; }
+  select.inp option { background: rgb(var(--card)); color: rgb(var(--ink)); }
+  @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes up { from { transform: translateY(28px); opacity: 0 } to { transform: none; opacity: 1 } }
+  @keyframes left { from { transform: translateX(36px); opacity: 0 } to { transform: none; opacity: 1 } }
+  @keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .anim-fade { animation: fade .18s ease-out; }
+  .anim-sheet { animation: up .28s cubic-bezier(.2,.8,.2,1); }
+  @media (min-width: 768px) { .anim-sheet { animation-name: left; } }
+  .anim-in { animation: up .4s cubic-bezier(.2,.8,.2,1) both; }
+  .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+}
