@@ -774,7 +774,7 @@ function PageHead({ eyebrow, title, action }: { eyebrow?: string; title: string;
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 mb-7">
       <div>
-        {eyebrow && <div className="text-[10px] sm:text-[12.5px] -mt-[5px] sm:mt-0 font-bold uppercase tracking-[0.16em] text-cognac mb-1.5">{eyebrow}</div>}
+        {eyebrow && <div className="text-[10px] sm:text-[12.5px] -mt-[5px] sm:mt-0 font-bold uppercase tracking-[0.16em] text-cognac mb-[36px] sm:mb-1.5">{eyebrow}</div>}
         <h1 className="font-display text-[32px] sm:text-[38px] leading-[1.08] text-heading">{title}</h1>
       </div>
       {action}
