@@ -1070,6 +1070,7 @@ function TripsPage() {
 
   return (
     <div>
+      <SyncReminder />
       <section className="mb-8">
         <div className="flex items-baseline justify-between mb-3">
           <h2 className="text-[12.5px] font-bold uppercase tracking-[0.24em] text-muted">Next up</h2>
@@ -1619,6 +1620,22 @@ function SyncButton() {
       className="relative h-11 w-11 rounded-full grid place-items-center bg-card border border-line text-ink">
       <Icon name={sync.status === 'syncing' ? 'refresh' : 'cloud'} size={19} className={sync.status === 'syncing' ? 'animate-spin' : ''} />
       <span className={`absolute top-2 right-2 h-2.5 w-2.5 rounded-full ring-2 ring-[rgb(var(--card))] ${dot}`} />
+    </button>
+  );
+}
+
+/** Prominent prompt when the Google sign-in has lapsed, so the latest data is fetched with one tap. */
+function SyncReminder() {
+  const { sync } = useStore();
+  if (!sync.connected || (sync.status !== 'needs-auth' && sync.status !== 'error')) return null;
+  return (
+    <button onClick={sync.syncNow} className="anim-in w-full mb-5 flex items-center gap-3 rounded-2xl border border-petrol/50 bg-petrol/15 px-4 py-3 text-left">
+      <span className="h-9 w-9 rounded-full grid place-items-center bg-petrol/25 text-petrol shrink-0"><Icon name="refresh" size={17} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14.5px] font-semibold text-ink">{sync.status === 'error' ? 'Sync problem – tap to retry' : 'Tap to update from Google Drive'}</span>
+        <span className="block text-[12.5px] text-muted">{sync.pending ? 'You have changes waiting to be saved.' : 'Shows the latest trips from your other devices.'}</span>
+      </span>
+      <Icon name="right" size={16} className="text-muted shrink-0" />
     </button>
   );
 }
