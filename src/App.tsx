@@ -1015,15 +1015,9 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
   const { data, duplicateTrip, setArchived, deleteTrip } = useStore();
   const days = daysBetween(trip.start, trip.end) + 1;
   const open = () => go(`#/trip/${trip.id}`);
-  // Preview: the next four events (or the first four of a past trip)
-  const entries = useMemo(() => buildEntries(data.activities.filter((a: Activity) => a.tripId === trip.id)), [data.activities, trip.id]);
-  const now = Date.now();
-  const upcoming = entries.filter(e => e.ms >= now || (e.endMs && e.endMs > now));
-  const preview = (upcoming.length ? upcoming : entries).slice(0, 4);
-  const next = findNext(entries);
   const status = tripStatus(trip);
   return (
-    <article className="anim-in min-w-0 overflow-hidden rounded-[24px] bg-card/90 border border-line p-3.5 sm:p-4 transition hover:border-white/15" style={{ animationDelay: `${idx * 50}ms` }}>
+    <article onClick={open} role="link" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} className="tone-press anim-in min-w-0 overflow-hidden cursor-pointer rounded-[24px] bg-card/90 border border-line p-3.5 sm:p-4 transition hover:border-white/15" style={{ animationDelay: `${idx * 50}ms` }}>
       <div className="flex gap-4">
         <button onClick={open} aria-label={`Open ${trip.name}`}><DestinationTile trip={trip} /></button>
         <div className="min-w-0 flex-1">
@@ -1056,37 +1050,6 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
           </button>
         </div>
       </div>
-
-      {preview.length > 0 && (
-        <div className="mt-4">
-          {preview.map((e, i) => {
-            const firstOfDay = i === 0 || preview[i - 1].date !== e.date;
-            const isNext = !!next && next.key === e.key;
-            return (
-              <React.Fragment key={e.key}>
-                {/* Day label as a slim divider above that day's events, so the cards get the full width */}
-                {firstOfDay && (
-                  <div className={`flex items-center gap-2.5 ${i === 0 ? '' : 'mt-2'} mb-1.5`}>
-                    <span className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-cognac whitespace-nowrap">{fmt(e.date, { weekday: 'short' })} {+e.date.slice(8)} {fmt(e.date, { month: 'short' })}</span>
-                    <span className="h-px flex-1 bg-line" />
-                  </div>
-                )}
-                <div className="grid grid-cols-[12px_minmax(0,1fr)] gap-x-2.5 items-center">
-                  <div className="relative self-stretch flex justify-center">
-                    <div className="absolute inset-y-0 border-l border-dashed border-white/20" />
-                    <div className={`relative self-center h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
-                  </div>
-                  <div className="py-1 min-w-0"><EntryCard e={e} /></div>
-                </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
-
-      <button onClick={open} className="mt-3 w-full flex items-center gap-3 border-t border-line pt-3.5 pb-1 px-2 text-[14px] text-muted hover:text-ink transition">
-        <Icon name="list" size={17} />{count ? `View all ${plural(count, 'activity', 'activities')}` : 'Open trip'}<Icon name="right" size={16} className="ml-auto" />
-      </button>
     </article>
   );
 }
