@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback, createContext
 import { useDriveSync } from './sync';
 import { useFileSync } from './files';
 import { renderPdf } from './pdf';
+import { useUpdateCheck } from './updates';
 
 /* =========================================================================
    TYPES
@@ -1931,6 +1932,7 @@ export function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<any>(null);
   const [viewDocId, setViewDocId] = useState<string | null>(null);
+  const appUpdate = useUpdateCheck();
   const [stagePick, setStagePick] = useState<any>(null);
   const [existingFor, setExistingFor] = useState<Activity | null>(null);
   const toastTimer = useRef<any>(null);
@@ -2020,6 +2022,11 @@ export function App() {
       {confirmState && <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />}
       <SyncPrompts />
 
+      {appUpdate.available && (
+        <div className="fixed z-[65] inset-x-0 flex justify-center px-4 bottom-[calc(env(safe-area-inset-bottom,0px)+80px)] lg:bottom-6 lg:pl-64">
+          <button onClick={appUpdate.update} className="anim-in rounded-full bg-primary text-white px-5 py-3 text-[14px] font-semibold shadow-lift flex items-center gap-2"><Icon name="refresh" size={16} />New version available · Update</button>
+        </div>
+      )}
       {toastMsg && (
         <div className="fixed z-[70] inset-x-0 flex justify-center px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)+86px)] lg:bottom-8 lg:pl-64">
           <div className="anim-in rounded-full bg-nav text-white border border-white/10 px-5 py-3 text-[14px] font-semibold shadow-lift flex items-center gap-2"><Icon name="check" size={16} className="text-[#E8BB91]" />{toastMsg}</div>
