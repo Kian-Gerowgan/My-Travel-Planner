@@ -845,9 +845,87 @@ async function shrinkImage(file: File): Promise<Blob> {
   } catch { return file; }
 }
 
+/** Illustrated Shanghai skyline at dusk across the Huangpu: Oriental Pearl Tower, Jin Mao, Shanghai Tower, SWFC. */
+function ShanghaiArt() {
+  const id = React.useId().replace(/:/g, '');
+  const u = (n: string) => `url(#${id}${n})`;
+  // Lit windows: deterministic scatter over the tower faces
+  const lights = Array.from({ length: 70 }, (_, i) => {
+    const towers = [[100, 112, 70, 150], [131, 147, 60, 150], [158, 174, 52, 150], [2, 48, 128, 150], [78, 100, 126, 150], [178, 198, 124, 150]];
+    const [x0, x1, y0, y1] = towers[i % towers.length];
+    const r = (k: number) => ((Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1 + 1) % 1;
+    return { x: x0 + r(1) * (x1 - x0), y: y0 + r(2) * (y1 - y0), o: 0.35 + r(3) * 0.55 };
+  });
+  const front = (
+    <>
+      {/* Oriental Pearl Tower */}
+      <polygon points="51,152 58.5,117 61,117 55.5,152" />
+      <polygon points="73,152 65.5,117 63,117 68.5,152" />
+      <rect x="60.6" y="58" width="2.8" height="94" />
+      <rect x="61.4" y="20" width="1.2" height="34" />
+      {/* Jin Mao */}
+      <polygon points="103,152 103,72 105,72 105,63 107,63 107,55 109,55 109,47 110.6,47 110.6,33 111.4,26 112.4,33 112.4,47 114,47 114,55 116,55 116,63 118,63 118,72 120,72 120,152" />
+      {/* Shanghai Tower */}
+      <path d="M129 152 C129.5 110 132 70 136.2 30 L138.4 20 L141 27 C145.5 68 149 110 150 152 Z" />
+      {/* Shanghai World Financial Center */}
+      <polygon points="156,152 160.5,40 168,35.5 172.5,40 177,152" />
+      {/* Lower blocks along the Bund side */}
+      <rect x="0" y="134" width="20" height="18" /><rect x="20" y="139" width="15" height="13" /><rect x="35" y="130" width="13" height="22" />
+      <rect x="76" y="127" width="13" height="25" /><rect x="89" y="133" width="12" height="19" /><rect x="121" y="124" width="7" height="28" />
+      <rect x="151" y="129" width="6" height="23" /><rect x="178" y="122" width="22" height="30" />
+    </>
+  );
+  return (
+    <svg viewBox="38 14 152 152" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1b2550" /><stop offset=".40" stopColor="#5c467a" /><stop offset=".62" stopColor="#c9705f" /><stop offset=".76" stopColor="#f6b670" />
+        </linearGradient>
+        <radialGradient id={`${id}sun`} cx=".66" cy=".74" r=".42">
+          <stop offset="0" stopColor="#ffe0a8" stopOpacity=".95" /><stop offset=".35" stopColor="#ffc078" stopOpacity=".35" /><stop offset="1" stopColor="#ffc078" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${id}water`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6a4a62" /><stop offset=".35" stopColor="#2c2848" /><stop offset="1" stopColor="#0b1120" />
+        </linearGradient>
+        <radialGradient id={`${id}pearl`} cx=".35" cy=".3" r=".8">
+          <stop offset="0" stopColor="#ff9fbd" /><stop offset=".6" stopColor="#c0477a" /><stop offset="1" stopColor="#5a1e46" />
+        </radialGradient>
+        <clipPath id={`${id}below`}><rect x="0" y="152" width="200" height="48" /></clipPath>
+      </defs>
+      <rect width="200" height="200" fill={u('sky')} />
+      <rect width="200" height="200" fill={u('sun')} />
+      {/* Distant skyline */}
+      <g fill="#3d3a62" opacity=".85">
+        <rect x="0" y="122" width="12" height="30" /><rect x="12" y="114" width="10" height="38" /><rect x="24" y="126" width="8" height="26" /><rect x="34" y="108" width="12" height="44" />
+        <rect x="46" y="118" width="9" height="34" /><rect x="86" y="110" width="10" height="42" /><rect x="96" y="100" width="7" height="52" /><rect x="122" y="112" width="8" height="40" />
+        <rect x="150" y="116" width="7" height="36" /><rect x="176" y="104" width="10" height="48" /><rect x="186" y="116" width="14" height="36" />
+      </g>
+      {/* Main skyline and its reflection in the Huangpu */}
+      <g fill="#121830">{front}</g>
+      <rect y="152" width="200" height="48" fill={u('water')} />
+      <g fill="#0d1226" opacity=".7" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{front}</g>`n      <g fill="#ff8fb4" opacity=".22"><ellipse cx="62" cy="189" rx="9" ry="3" /><ellipse cx="62" cy="228" rx="6" ry="2" /></g>
+      <g fill="#ffcf8f">
+        {[156, 161, 166, 171, 177, 184, 191].map((y, i) => <rect key={y} x={124 - i * 2} y={y} width={18 + i * 4} height=".9" opacity={0.55 - i * 0.06} />)}
+      </g>
+      <rect y="151.6" width="200" height=".8" fill="#ffd9a0" opacity=".35" />
+      {/* Pearl Tower spheres, SWFC opening and city lights */}
+      <circle cx="62" cy="115" r="10.5" fill={u('pearl')} />
+      <circle cx="62" cy="76" r="7.5" fill={u('pearl')} />
+      <circle cx="62" cy="54" r="3" fill={u('pearl')} />
+      <polygon points="162.4,44.5 170.2,42.5 170.2,49 162.4,51" fill="#e9926a" />
+      <g fill="#ffd79a">{lights.map((l, i) => <rect key={i} x={l.x} y={l.y} width="1.1" height="1.4" opacity={l.o} />)}</g>
+    </svg>
+  );
+}
+
+/** Built-in illustrations for destinations, used when a trip has no cover photo. */
+const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt };
+
 function DestinationTile({ trip }: { trip: Trip }) {
   const cover = useCoverUrl(trip.id);
   if (cover) return <img src={cover} alt="" className="h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 rounded-2xl object-cover border border-white/10" />;
+  const Art = CITY_ART[(trip.cities[0] || '').trim().toLowerCase()];
+  if (Art) return <div className="relative h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 overflow-hidden rounded-2xl border border-white/10"><Art /></div>;
   const city = trip.cities[0] || trip.countries[0] || trip.name;
   const tint = trip.kind === 'private' ? '217 154 96' : '50 159 255';
   return (
