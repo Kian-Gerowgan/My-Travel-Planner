@@ -547,55 +547,59 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 /* =========================================================================
    TIMELINE
    ========================================================================= */
-/** Short title/subtitle/badge for the compact event cards. */
-function compactView(e: Entry) {
+/** Text for the event cards: a time line, a title that may wrap, and a detail line. */
+function compactView(e: Entry, contacts: Contact[] = []) {
   const a = e.a, d = a.details || {};
   const icon = TYPE_META[a.type].icon;
   const withCode = (s?: string) => (s ? (code(s) !== place(s) ? `${place(s)} ${code(s)}` : place(s)) : '');
-  if (e.kind === 'arrival') return { icon: 'landing', title: `Arrival ${place(d.to)}`.trim(), sub: [d.flightNo || d.trainNo, d.from ? 'from ' + place(d.from) : ''].filter(Boolean).join(' · '), badge: '' };
-  if (e.kind === 'checkout') return { icon: 'logout', title: 'Check-out', sub: a.title, badge: '' };
+  const range = e.time + (e.endTime ? `–${e.endTime}` : '');
+  const names = a.contactIds.map(id => contacts.find(c => c.id === id)?.name).filter(Boolean) as string[];
+  if (e.kind === 'arrival') return { icon: 'landing', time: e.time, title: `Arrival ${withCode(d.to)}`.trim(), sub: [d.flightNo || d.trainNo, d.from ? 'from ' + place(d.from) : ''].filter(Boolean).join(' · '), badge: '' };
+  if (e.kind === 'checkout') return { icon: 'logout', time: e.time, title: `Check-out · ${a.title}`, sub: d.address || '', badge: '' };
   switch (a.type) {
-    case 'flight': case 'train':
-      return { icon, title: d.to ? `${a.type === 'flight' ? 'Flight' : 'Train'} to ${place(d.to)}` : a.title, sub: d.from && d.to ? `${withCode(d.from)} → ${withCode(d.to)}` : d.airline || d.operator || '', badge: d.flightNo || d.trainNo || '' };
+    case 'flight': case 'train': {
+      const shift = a.end ? daysBetween(a.start.slice(0, 10), a.end.slice(0, 10)) : 0;
+      const time = a.end ? `${e.time} → ${a.end.slice(11, 16)}${shift > 0 ? ` +${shift}` : ''}` : e.time;
+      const dur = a.end ? durText(toUtc(a.end, a.endTz || a.startTz) - e.ms) : '';
+      return { icon, time, title: d.from && d.to ? `${withCode(d.from)} → ${withCode(d.to)}` : a.title, sub: [d.airline || d.operator, dur, d.seat].filter(Boolean).join(' · '), badge: d.flightNo || d.trainNo || '' };
+    }
     case 'hotel': {
       const n = a.end ? daysBetween(a.start.slice(0, 10), a.end.slice(0, 10)) : 0;
-      return { icon, title: 'Check-in', sub: a.title, badge: n ? plural(n, 'night', 'nights') : '' };
+      return { icon, time: e.time, title: `Check-in · ${a.title}`, sub: d.address || '', badge: n ? plural(n, 'night', 'nights') : '' };
     }
-    case 'meeting': return { icon, title: a.title, sub: d.company || a.location || '', badge: '' };
-    case 'transfer': return { icon, title: a.title, sub: d.from && d.to ? `${place(d.from)} → ${place(d.to)}` : d.mode || '', badge: '' };
-    default: return { icon, title: a.title, sub: a.location || '', badge: '' };
+    case 'meeting': return { icon, time: range, title: a.title, sub: [d.company && d.company !== a.title ? d.company : '', names.join(', '), a.location].filter(Boolean).join(' · '), badge: '' };
+    case 'transfer': return { icon, time: range, title: a.title, sub: [d.from && d.to ? `${place(d.from)} → ${place(d.to)}` : '', d.mode].filter(Boolean).join(' · '), badge: '' };
+    default: return { icon, time: range, title: a.title, sub: a.location || '', badge: '' };
   }
 }
 
-/** One event as a compact, colour-coded card: icon · time | title / subtitle · badge › */
+/** One event as a colour-coded card: time line, wrapping title, detail line. */
 function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; showTrip?: string }) {
   const ui = useUI();
   const { data } = useStore();
-  const v = compactView(e);
+  const v = compactView(e, data.contacts);
   const a = e.a;
-  const docCount = e.kind === 'main' ? data.documents.filter((x: Doc) => x.activityIds.includes(a.id)).length : 0;
+  const docCount = e.kind === 'main' ? data.documents.filter((x: Doc) => x.activityIds.includes(a.id) && !x.cover).length : 0;
   const sub = [showTrip, v.sub].filter(Boolean).join(' · ');
   return (
     <button onClick={() => ui.openActivity(a.id)}
-      className={`tone-press w-full flex items-center gap-2.5 rounded-[18px] pl-2 pr-2.5 py-2 text-left tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
-      <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0"><Icon name={v.icon} size={17} /></span>
-      <span className="w-[40px] shrink-0 leading-tight">
-        <span className="block tone-ink text-[14.5px] font-medium tabular-nums">{e.time}</span>
-        {e.endTime && <span className="block tone-ink opacity-70 text-[11.5px] tabular-nums">{e.endTime}</span>}
-      </span>
-      <span className="w-px self-stretch my-0.5 bg-white/15" />
+      className={`tone-press w-full flex items-start gap-3 rounded-[18px] p-3 text-left tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
+      <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0 mt-0.5"><Icon name={v.icon} size={17} /></span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-medium text-ink truncate">{v.title}</span>
-        {sub && <span className="block text-[12.5px] tone-ink opacity-90 truncate">{sub}</span>}
-      </span>
-      {(docCount > 0 || a.notes.length > 0) && e.kind === 'main' && (
-        <span className="hidden md:flex items-center gap-2 text-[11.5px] text-ink/60 shrink-0">
-          {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
-          {a.notes.length > 0 && <span className="flex items-center gap-0.5" title="Notes"><Icon name="note" size={12} />{a.notes.length}</span>}
+        <span className="flex items-center gap-2">
+          <span className="tone-ink text-[14px] font-semibold tabular-nums">{v.time}</span>
+          {(docCount > 0 || (a.notes.length > 0 && e.kind === 'main')) && (
+            <span className="flex items-center gap-2 text-[11.5px] text-ink/55">
+              {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
+              {a.notes.length > 0 && e.kind === 'main' && <span className="flex items-center gap-0.5" title="Notes"><Icon name="note" size={12} />{a.notes.length}</span>}
+            </span>
+          )}
+          {v.badge && <span className="ml-auto text-[12.5px] font-medium text-ink/85 tabular-nums shrink-0">{v.badge}</span>}
         </span>
-      )}
-      {v.badge && <span className="text-[13px] font-medium text-ink/85 shrink-0 tabular-nums">{v.badge}</span>}
-      <Icon name="right" size={16} className="text-ink/60 shrink-0" />
+        <span className="block text-[15px] font-medium leading-snug text-ink mt-0.5">{v.title}</span>
+        {sub && <span className="block text-[12.5px] leading-snug tone-ink opacity-90 mt-0.5">{sub}</span>}
+      </span>
+      <Icon name="right" size={16} className="text-ink/50 shrink-0 self-center" />
     </button>
   );
 }
@@ -919,8 +923,73 @@ function ShanghaiArt() {
   );
 }
 
+/** Illustrated Guangzhou at blue hour across the Pearl River: the glowing Canton Tower, IFC and CTF Finance Centre. */
+function GuangzhouArt() {
+  const id = React.useId().replace(/:/g, '');
+  const u = (n: string) => `url(#${id}${n})`;
+  const lights = Array.from({ length: 64 }, (_, i) => {
+    const towers = [[113, 123, 46, 150], [136, 154, 50, 150], [160, 176, 92, 150], [86, 100, 104, 150], [2, 30, 120, 150], [178, 198, 112, 150]];
+    const [x0, x1, y0, y1] = towers[i % towers.length];
+    const r = (k: number) => ((Math.sin(i * 7.31 + k * 51.7) * 24634.6345) % 1 + 1) % 1;
+    return { x: x0 + r(1) * (x1 - x0), y: y0 + r(2) * (y1 - y0), o: 0.35 + r(3) * 0.55 };
+  });
+  const city = (
+    <>
+      {/* Guangzhou IFC (West Tower) */}
+      <polygon points="113,152 113.5,44 118,32 122.5,44 123,152" />
+      {/* CTF Finance Centre (East Tower) */}
+      <polygon points="136,152 136,52 138,52 138,42 140,42 140,34 150,34 150,42 152,42 152,52 154,52 154,152" />
+      <rect x="144.5" y="22" width="1.2" height="12" />
+      {/* Surrounding blocks of Zhujiang New Town */}
+      <rect x="86" y="102" width="14" height="50" /><rect x="100" y="118" width="11" height="34" /><rect x="125" y="96" width="9" height="56" />
+      <rect x="160" y="90" width="16" height="62" /><rect x="176" y="110" width="22" height="42" /><rect x="0" y="118" width="30" height="34" /><rect x="30" y="130" width="14" height="22" />
+    </>
+  );
+  return (
+    <svg viewBox="22 10 156 156" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0f1a3e" /><stop offset=".45" stopColor="#2b3a78" /><stop offset=".68" stopColor="#6a5aa0" /><stop offset=".78" stopColor="#e39a7a" />
+        </linearGradient>
+        <linearGradient id={`${id}water`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#3b3c6e" /><stop offset=".4" stopColor="#1b2248" /><stop offset="1" stopColor="#0a0f22" />
+        </linearGradient>
+        <linearGradient id={`${id}tower`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ff8fd0" /><stop offset=".45" stopColor="#c45cff" /><stop offset="1" stopColor="#3fa9ff" />
+        </linearGradient>
+        <radialGradient id={`${id}glow`} cx=".5" cy=".5" r=".5">
+          <stop offset="0" stopColor="#d77bff" stopOpacity=".55" /><stop offset="1" stopColor="#d77bff" stopOpacity="0" />
+        </radialGradient>
+        <clipPath id={`${id}below`}><rect x="0" y="152" width="200" height="48" /></clipPath>
+      </defs>
+      <rect width="200" height="200" fill={u('sky')} />
+      <g fill="#33356a" opacity=".85">
+        <rect x="40" y="112" width="10" height="40" /><rect x="74" y="108" width="12" height="44" /><rect x="128" y="104" width="8" height="48" /><rect x="156" y="100" width="6" height="52" /><rect x="186" y="98" width="14" height="54" />
+      </g>
+      <g fill="#10142c">{city}</g>
+      {/* Canton Tower: twisted hourglass lattice with antenna */}
+      <ellipse cx="62" cy="80" rx="22" ry="52" fill={u('glow')} />
+      <path d="M50 152 C55 122 58 98 59.6 80 C58.6 66 57.2 54 56.6 44 L67.4 44 C66.8 54 65.4 66 64.4 80 C66 98 69 122 74 152 Z" fill={u('tower')} />
+      <g stroke="#2a1640" strokeWidth=".55" opacity=".55">
+        {Array.from({ length: 12 }, (_, i) => <line key={i} x1={50 + i * 2} y1="152" x2={56.6 + i} y2="44" />)}
+        {[60, 76, 92, 108, 124, 140].map(y => <line key={y} x1="40" y1={y} x2="84" y2={y} />)}
+      </g>
+      <rect x="56" y="41.5" width="12" height="3" rx="1" fill="#ffb3e3" />
+      <rect x="61.4" y="10" width="1.2" height="32" fill="#ffb3e3" />
+      <circle cx="62" cy="10" r="1.3" fill="#ff5f8a" />
+      {/* Pearl River with reflections */}
+      <rect y="152" width="200" height="48" fill={u('water')} />
+      <g fill="#10142c" opacity=".65" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{city}</g>
+      <path d="M50 152 C55 182 58 206 59.6 224 L64.4 224 C66 206 69 182 74 152 Z" fill={u('tower')} opacity=".28" clipPath={u('below')} />
+      <g fill="#ffd2f0">{[158, 164, 171, 179, 188].map((y, i) => <rect key={y} x={56 - i * 2} y={y} width={12 + i * 4} height=".8" opacity={0.45 - i * 0.07} />)}</g>
+      <rect y="151.6" width="200" height=".8" fill="#9fc6ff" opacity=".35" />
+      <g fill="#ffe1a8">{lights.map((l, i) => <rect key={i} x={l.x} y={l.y} width="1.1" height="1.4" opacity={l.o} />)}</g>
+    </svg>
+  );
+}
+
 /** Built-in illustrations for destinations, used when a trip has no cover photo. */
-const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt };
+const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt };
 
 function DestinationTile({ trip }: { trip: Trip }) {
   const cover = useCoverUrl(trip.id);
@@ -994,16 +1063,22 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
             const firstOfDay = i === 0 || preview[i - 1].date !== e.date;
             const isNext = !!next && next.key === e.key;
             return (
-              <div key={e.key} className="grid grid-cols-[46px_14px_minmax(0,1fr)] gap-x-2 items-center">
-                <div className="text-[11px] font-semibold uppercase leading-tight text-muted tracking-wide">
-                  {firstOfDay && <>{fmt(e.date, { weekday: 'short' })}<br />{+e.date.slice(8)} {fmt(e.date, { month: 'short' })}</>}
+              <React.Fragment key={e.key}>
+                {/* Day label as a slim divider above that day's events, so the cards get the full width */}
+                {firstOfDay && (
+                  <div className={`flex items-center gap-2.5 ${i === 0 ? '' : 'mt-2'} mb-1.5`}>
+                    <span className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-cognac whitespace-nowrap">{fmt(e.date, { weekday: 'short' })} {+e.date.slice(8)} {fmt(e.date, { month: 'short' })}</span>
+                    <span className="h-px flex-1 bg-line" />
+                  </div>
+                )}
+                <div className="grid grid-cols-[12px_minmax(0,1fr)] gap-x-2.5 items-center">
+                  <div className="relative self-stretch flex justify-center">
+                    <div className="absolute inset-y-0 border-l border-dashed border-white/20" />
+                    <div className={`relative self-center h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
+                  </div>
+                  <div className="py-1 min-w-0"><EntryCard e={e} /></div>
                 </div>
-                <div className="relative self-stretch flex justify-center">
-                  <div className={`absolute ${i === 0 ? 'top-1/2' : 'top-0'} ${i === preview.length - 1 ? 'bottom-1/2' : 'bottom-0'} border-l border-dashed border-white/20`} />
-                  <div className={`relative self-center h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
-                </div>
-                <div className="py-1 min-w-0"><EntryCard e={e} /></div>
-              </div>
+              </React.Fragment>
             );
           })}
         </div>

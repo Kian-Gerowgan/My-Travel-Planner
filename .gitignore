@@ -6,3 +6,5 @@ dist
 .claude/settings.local.json
 # The single-file prototype is kept locally for reference only
 prototype/publish
+
+tmp-preview-data.json
