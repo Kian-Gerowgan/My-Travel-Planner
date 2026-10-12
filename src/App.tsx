@@ -21,7 +21,7 @@ interface Activity {
 interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
 /** A file belonging to a trip. Uploaded once; linked to any number of the trip's stages (none = general). */
-interface Doc { id: string; tripId: string; name: string; mime: string; size: number; activityIds: string[]; addedAt: string; driveId?: string; }
+interface Doc { id: string; tripId: string; name: string; mime: string; size: number; activityIds: string[]; addedAt: string; driveId?: string; cover?: boolean; }
 interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; documents: Doc[]; sample?: boolean; }
 interface Entry { key: string; a: Activity; kind: 'main' | 'arrival' | 'checkout'; date: string; time: string; endTime?: string; ms: number; endMs?: number; }
 
@@ -405,6 +405,16 @@ export function StoreProvider({ children }: { children: any }) {
       const doc = dataRef.current.documents.find(x => x.id === id);
       if (doc) files.removeLocal(doc);
       api.edit(d => ({ ...d, documents: d.documents.filter(x => x.id !== id) }));
+    },
+    /** Replaces the trip's cover photo (resized before storing); null removes it. */
+    setCover: async (tripId: string, file: File | null) => {
+      dataRef.current.documents.filter(x => x.tripId === tripId && x.cover).forEach(files.removeLocal);
+      api.edit(d => ({ ...d, documents: d.documents.filter(x => !(x.tripId === tripId && x.cover)) }));
+      if (!file) return;
+      const blob = await shrinkImage(file);
+      const doc: Doc = { id: uid(), tripId, name: 'Cover photo.jpg', mime: blob.type || 'image/jpeg', size: blob.size, activityIds: [], addedAt: nowLocal(), cover: true };
+      await files.saveLocal(doc.id, blob);
+      api.edit(d => ({ ...d, documents: [...d.documents, doc] }));
     },
     deleteTrip: (id: string) => {
       dataRef.current.documents.filter(x => x.tripId === id).forEach(files.removeLocal);
@@ -806,7 +816,38 @@ function rangeCaps(a: string, b: string) {
 }
 
 /** Destination tile in place of a photo: city code over a dusk gradient tinted by trip type. */
+const coverUrls: Record<string, string> = {};
+/** Object URL of a trip's cover photo, from this device or Google Drive ('' when none or unavailable). */
+function useCoverUrl(tripId: string) {
+  const { data, files } = useStore();
+  const doc: Doc | undefined = data.documents.find((d: Doc) => d.tripId === tripId && d.cover);
+  const [url, setUrl] = useState(doc ? coverUrls[doc.id] || '' : '');
+  useEffect(() => {
+    if (!doc) { setUrl(''); return; }
+    if (coverUrls[doc.id]) { setUrl(coverUrls[doc.id]); return; }
+    let alive = true;
+    files.getBlob(doc).then((b: Blob) => { coverUrls[doc.id] = URL.createObjectURL(b); if (alive) setUrl(coverUrls[doc.id]); }).catch(() => {});
+    return () => { alive = false; };
+  }, [doc?.id, doc?.driveId, files.localIds]);
+  return url;
+}
+
+/** Scales a photo down to at most 1400 px and re-encodes it as JPEG, so covers stay small. */
+async function shrinkImage(file: File): Promise<Blob> {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+    const out = await new Promise<Blob | null>(r => c.toBlob(r, 'image/jpeg', 0.82));
+    return out || file;
+  } catch { return file; }
+}
+
 function DestinationTile({ trip }: { trip: Trip }) {
+  const cover = useCoverUrl(trip.id);
+  if (cover) return <img src={cover} alt="" className="h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 rounded-2xl object-cover border border-white/10" />;
   const city = trip.cities[0] || trip.countries[0] || trip.name;
   const tint = trip.kind === 'private' ? '217 154 96' : '50 159 255';
   return (
@@ -846,6 +887,7 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
             <div className="-mr-1 -mt-0.5 shrink-0">
               <Menu items={[
                 { label: 'Edit', icon: 'pencil', onClick: () => ui.editTrip(trip) },
+                { label: 'Cover photo', icon: 'image', onClick: () => ui.editTrip(trip) },
                 { label: 'Duplicate', icon: 'copy', onClick: () => { duplicateTrip(trip.id); ui.toast('Trip duplicated'); } },
                 { label: trip.archived ? 'Restore from archive' : 'Archive', icon: 'archive', onClick: () => { setArchived(trip.id, !trip.archived); ui.toast(trip.archived ? 'Trip restored' : 'Trip archived'); } },
                 { label: 'Delete', icon: 'trash', danger: true, onClick: () => ui.confirm({ title: 'Delete trip?', text: `“${trip.name}” and all ${plural(count, 'activity', 'activities')} will be permanently deleted.`, ok: 'Delete', onOk: () => { deleteTrip(trip.id); ui.toast('Trip deleted'); } }) },
@@ -1021,7 +1063,7 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
   if (!trip) return <Empty icon="globe" title="Trip not found" text="This trip no longer exists." action={<button className="btn btn-primary" onClick={() => go('#/trips')}>Back to all trips</button>} />;
   const status = tripStatus(trip);
   const days = daysBetween(trip.start, trip.end) + 1;
-  const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id).length;
+  const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id && !d.cover).length;
   const td = todayStr();
 
   return (
@@ -1154,7 +1196,7 @@ function DocRow({ d, activityId, showStages = true }: { d: Doc; activityId?: str
 function TripDocuments({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
   const { data, sync } = useStore();
   const ui = useUI();
-  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === trip.id);
+  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === trip.id && !d.cover);
   const actMs = (id: string) => { const a = acts.find(x => x.id === id); return a ? toUtc(a.start, a.startTz) : Infinity; };
   const firstMs = (d: Doc) => Math.min(...d.activityIds.map(actMs));
 
@@ -1252,7 +1294,7 @@ function ExistingDocPicker({ activity, onClose }: { activity: Activity; onClose:
   const { data, linkDocs } = useStore();
   const ui = useUI();
   const [sel, setSel] = useState<string[]>([]);
-  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === activity.tripId && !d.activityIds.includes(activity.id));
+  const docs: Doc[] = data.documents.filter((d: Doc) => d.tripId === activity.tripId && !d.cover && !d.activityIds.includes(activity.id));
   return (
     <Sheet onClose={onClose} label="Link existing document">
       <SheetHead onClose={onClose} title="Link a trip document" eyebrow={<div className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac truncate">{activity.title}</div>} />
@@ -1956,9 +1998,15 @@ function ActivityForm({ init, onClose }: { init: { tripId: string; activity?: Ac
 }
 
 function TripForm({ trip, onClose }: { trip: Trip | null; onClose: () => void }) {
-  const { saveTrip } = useStore();
+  const { saveTrip, setCover } = useStore();
   const ui = useUI();
   const td = todayStr();
+  const existingCover = useCoverUrl(trip?.id || '');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverRemoved, setCoverRemoved] = useState(false);
+  const coverPreview = useMemo(() => (coverFile ? URL.createObjectURL(coverFile) : ''), [coverFile]);
+  const coverRef = useRef<HTMLInputElement>(null);
+  const shownCover = coverPreview || (coverRemoved ? '' : existingCover);
   const [f, setF] = useState(() => trip ? { ...trip, countriesText: trip.countries.join(', '), citiesText: trip.cities.join(', ') }
     : { id: uid(), name: '', kind: 'business', countries: [], cities: [], start: td, end: addDays(td, 3), archived: false, countriesText: '', citiesText: '' });
   const [err, setErr] = useState('');
@@ -1969,6 +2017,8 @@ function TripForm({ trip, onClose }: { trip: Trip | null; onClose: () => void })
     if (!f.start || !f.end || f.end < f.start) { setErr('The end date must be on or after the start date.'); return; }
     const { countriesText, citiesText, ...rest } = f as any;
     saveTrip({ ...rest, name: f.name.trim(), countries: split(countriesText), cities: split(citiesText) });
+    if (coverFile) setCover(f.id, coverFile);
+    else if (coverRemoved) setCover(f.id, null);
     ui.toast(trip ? 'Trip saved' : 'Trip created');
     onClose();
     if (!trip) go(`#/trip/${f.id}`);
@@ -1985,6 +2035,20 @@ function TripForm({ trip, onClose }: { trip: Trip | null; onClose: () => void })
         </div>
         <Field label="Countries"><input id="trip-countries" className="inp" value={f.countriesText} placeholder="e.g. China" onChange={e => set({ countriesText: e.target.value })} /></Field>
         <Field label="Cities (in order)"><input id="trip-cities" className="inp" value={f.citiesText} placeholder="e.g. Shanghai, Xiamen, Guangzhou" onChange={e => set({ citiesText: e.target.value })} /></Field>
+        <div>
+          <span className="lbl">Cover photo</span>
+          <div className="flex items-center gap-4">
+            {shownCover
+              ? <img src={shownCover} alt="Cover photo" className="h-20 w-20 rounded-2xl object-cover border border-line" />
+              : <div className="h-20 w-20 rounded-2xl border border-dashed border-line grid place-items-center text-muted"><Icon name="image" size={22} /></div>}
+            <div className="flex flex-col items-start gap-1.5">
+              <button className="btn btn-ghost h-10" onClick={() => coverRef.current?.click()}><Icon name="camera" size={16} />{shownCover ? 'Change photo' : 'Choose photo'}</button>
+              {shownCover && <button className="text-[13px] font-semibold text-danger hover:underline px-1" onClick={() => { setCoverFile(null); setCoverRemoved(true); }}>Remove photo</button>}
+            </div>
+            <input id="trip-cover" ref={coverRef} type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) { setCoverFile(file); setCoverRemoved(false); } }} />
+          </div>
+          <p className="text-[12.5px] text-muted mt-2">Shown on the trip card. Saved with the trip in Google Drive.</p>
+        </div>
         {err && <div className="rounded-xl bg-danger/10 text-danger px-4 py-3 text-[14px]">{err}</div>}
       </div>
       <SheetFoot>

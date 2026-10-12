@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as drive from './drive';
 import * as idb from './idb';
 
-interface FileDoc { id: string; tripId: string; name: string; mime: string; driveId?: string; }
+interface FileDoc { id: string; tripId: string; name: string; mime: string; driveId?: string; cover?: boolean; }
 interface FileTrip { id: string; name: string; end: string; }
 interface SyncInfo { connected: boolean; status: string; folderId?: string; lastSync?: number; }
 
@@ -59,11 +59,12 @@ export function useFileSync(docs: FileDoc[], trips: FileTrip[], sync: SyncInfo, 
       for (const d of docsRef.current) {
         const trip = tripsRef.current.find(t => t.id === d.tripId);
         if (!trip || !d.driveId) continue;
-        if (trip.end >= keepFrom && !have.has(d.id)) {
+        // Cover photos are small and shown on every trip card, so they always stay on the device.
+        if ((trip.end >= keepFrom || d.cover) && !have.has(d.id)) {
           setBusy(b => ({ ...b, [d.id]: 'down' }));
           try { await idb.putFile(d.id, await drive.downloadBlob(d.driveId)); }
           finally { setBusy(b => { const n = { ...b }; delete n[d.id]; return n; }); }
-        } else if (trip.end < keepFrom && have.has(d.id)) await idb.deleteFile(d.id);
+        } else if (trip.end < keepFrom && !d.cover && have.has(d.id)) await idb.deleteFile(d.id);
       }
       // Remove offline copies of documents that no longer exist
       const known = new Set(docsRef.current.map(d => d.id));
