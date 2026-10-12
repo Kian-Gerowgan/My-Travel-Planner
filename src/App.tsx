@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
+import { useDriveSync } from './sync';
 
 /* =========================================================================
    TYPES
@@ -17,7 +18,7 @@ interface Activity {
 }
 interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
-interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; }
+interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; sample?: boolean; }
 interface Entry { key: string; a: Activity; kind: 'main' | 'arrival' | 'checkout'; date: string; time: string; endTime?: string; ms: number; endMs?: number; }
 
 /* =========================================================================
@@ -300,7 +301,7 @@ function sampleData(): Data {
     A('ham', 'hotel', 'The Fontenay', '2026-09-08T18:00', B, '2026-09-09T10:00', B, { city: 'Hamburg', details: { address: 'Fontenay 10, 20354 Hamburg' } }),
     A('ham', 'train', 'Train Hamburg → Frankfurt', '2026-09-09T12:01', B, '2026-09-09T15:46', B, { details: { operator: 'Deutsche Bahn', trainNo: 'ICE 577', from: 'Hamburg Hbf', to: 'Frankfurt (Main) Hbf' } }),
   ];
-  return { version: 2, trips, activities, contacts };
+  return { version: 2, trips, activities, contacts, sample: true };
 }
 
 /* =========================================================================
@@ -346,6 +347,7 @@ const ICONS: Record<string, string> = {
   eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
 };
 function Icon({ name, size = 18, className = '', stroke = 1.75 }: { name: string; size?: number; className?: string; stroke?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" className={'shrink-0 ' + className} aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
@@ -367,32 +369,36 @@ export function StoreProvider({ children }: { children: any }) {
 
   const api = useMemo(() => {
     const upsert = (list: any[], item: any) => list.some(x => x.id === item.id) ? list.map(x => x.id === item.id ? item : x) : [...list, item];
+    // Any edit turns the sample trips into the user's own data.
+    const edit = (f: (d: Data) => Data) => setData(d => { const n = f(d); return n === d ? d : { ...n, sample: false }; });
     return {
-      saveTrip: (t: Trip) => setData(d => ({ ...d, trips: upsert(d.trips, t) })),
-      deleteTrip: (id: string) => setData(d => ({ ...d, trips: d.trips.filter(t => t.id !== id), activities: d.activities.filter(a => a.tripId !== id) })),
-      duplicateTrip: (id: string) => setData(d => {
+      saveTrip: (t: Trip) => edit(d => ({ ...d, trips: upsert(d.trips, t) })),
+      deleteTrip: (id: string) => edit(d => ({ ...d, trips: d.trips.filter(t => t.id !== id), activities: d.activities.filter(a => a.tripId !== id) })),
+      duplicateTrip: (id: string) => edit(d => {
         const t = d.trips.find(x => x.id === id); if (!t) return d;
         const nid = uid();
         const acts = d.activities.filter(a => a.tripId === id).map(a => ({ ...clone(a), id: uid(), tripId: nid }));
         return { ...d, trips: [...d.trips, { ...t, id: nid, name: t.name + ' (copy)', archived: false }], activities: [...d.activities, ...acts] };
       }),
-      setArchived: (id: string, archived: boolean) => setData(d => ({ ...d, trips: d.trips.map(t => t.id === id ? { ...t, archived } : t) })),
-      saveActivity: (a: Activity) => setData(d => ({ ...d, activities: upsert(d.activities, a) })),
-      updateActivity: (id: string, fn: (a: Activity) => Activity) => setData(d => ({ ...d, activities: d.activities.map(a => a.id === id ? fn(a) : a) })),
-      deleteActivity: (id: string) => setData(d => ({ ...d, activities: d.activities.filter(a => a.id !== id) })),
-      duplicateActivity: (id: string) => setData(d => {
+      setArchived: (id: string, archived: boolean) => edit(d => ({ ...d, trips: d.trips.map(t => t.id === id ? { ...t, archived } : t) })),
+      saveActivity: (a: Activity) => edit(d => ({ ...d, activities: upsert(d.activities, a) })),
+      updateActivity: (id: string, fn: (a: Activity) => Activity) => edit(d => ({ ...d, activities: d.activities.map(a => a.id === id ? fn(a) : a) })),
+      deleteActivity: (id: string) => edit(d => ({ ...d, activities: d.activities.filter(a => a.id !== id) })),
+      duplicateActivity: (id: string) => edit(d => {
         const a = d.activities.find(x => x.id === id); if (!a) return d;
         const c = clone(a); c.id = uid(); c.title = a.title + ' (copy)';
         c.notes = c.notes.map((n: Note) => ({ ...n, id: uid() })); c.tasks = c.tasks.map((t: Task) => ({ ...t, id: uid() }));
         return { ...d, activities: [...d.activities, c] };
       }),
-      saveContact: (c: Contact) => setData(d => ({ ...d, contacts: upsert(d.contacts, c) })),
-      deleteContact: (id: string) => setData(d => ({ ...d, contacts: d.contacts.filter(c => c.id !== id), activities: d.activities.map(a => ({ ...a, contactIds: a.contactIds.filter(x => x !== id) })) })),
-      importContacts: (list: Contact[]) => setData(d => ({ ...d, contacts: [...d.contacts, ...list] })),
+      saveContact: (c: Contact) => edit(d => ({ ...d, contacts: upsert(d.contacts, c) })),
+      deleteContact: (id: string) => edit(d => ({ ...d, contacts: d.contacts.filter(c => c.id !== id), activities: d.activities.map(a => ({ ...a, contactIds: a.contactIds.filter(x => x !== id) })) })),
+      importContacts: (list: Contact[]) => edit(d => ({ ...d, contacts: [...d.contacts, ...list] })),
       reset: () => setData(sampleData()),
     };
   }, []);
-  return <StoreCtx.Provider value={{ data, ...api }}>{children}</StoreCtx.Provider>;
+  const replaceData = useCallback((d: any) => setData(d), []);
+  const sync = useDriveSync(data, replaceData);
+  return <StoreCtx.Provider value={{ data, sync, ...api }}>{children}</StoreCtx.Provider>;
 }
 
 const UICtx = createContext<any>(null);
@@ -1070,8 +1076,58 @@ function csvToContacts(rows: string[][]): Contact[] {
   }).filter(c => c.name);
 }
 
+function syncLabel(s: any) {
+  if (!s.connected) return 'Not connected';
+  const t = s.lastSync ? new Date(s.lastSync) : null;
+  const when = t ? (t.toDateString() === new Date().toDateString() ? `${pad(t.getHours())}:${pad(t.getMinutes())}` : `${t.getDate()} ${t.toLocaleString(LOCALE, { month: 'short' })}`) : '';
+  switch (s.status) {
+    case 'syncing': return 'Syncing…';
+    case 'offline': return s.pending ? 'Offline · changes saved on this device' : 'Offline · showing saved copy';
+    case 'needs-auth': return s.pending ? 'Changes waiting · tap to sync' : 'Tap to sync';
+    case 'error': return 'Sync problem · tap to retry';
+    default: return s.pending ? 'Changes waiting…' : when ? `Synced ${when}` : 'Synced';
+  }
+}
+
+function SyncBadge({ dark = false }: { dark?: boolean }) {
+  const { sync } = useStore();
+  const ok = sync.connected && sync.status === 'idle' && !sync.pending;
+  const warn = sync.status === 'error';
+  const onClick = () => { if (!sync.connected) go('#/settings'); else sync.syncNow(); };
+  return (
+    <button onClick={onClick} title={sync.error || 'Google Drive sync'}
+      className={`flex items-center gap-2 rounded-full text-left font-semibold transition ${dark ? 'w-full px-2.5 py-2 text-[12px] text-white/65 hover:text-white hover:bg-white/5' : 'px-2 py-1 text-[11px] text-muted hover:text-heading'}`}>
+      {sync.status === 'syncing'
+        ? <Icon name="refresh" size={dark ? 14 : 12} className="animate-spin" />
+        : <span className={`h-2 w-2 rounded-full shrink-0 ${warn ? 'bg-danger' : ok ? 'bg-dot' : dark ? 'bg-[#E8BB91]' : 'bg-cognac'}`} />}
+      <span className="truncate">{sync.connected ? syncLabel(sync) : dark ? 'Saved on this device · Connect Drive' : 'This device'}</span>
+    </button>
+  );
+}
+
+function SyncPrompts() {
+  const { sync } = useStore();
+  const ui = useUI();
+  useEffect(() => { if (sync.notice) { ui.toast(sync.notice); sync.clearNotice(); } }, [sync.notice]);
+  if (!sync.choice) return null;
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center p-5" role="alertdialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60 anim-fade" />
+      <div className="relative w-full max-w-md rounded-3xl bg-card border border-line p-6 shadow-lift anim-in">
+        <div className="h-11 w-11 rounded-2xl bg-pale text-petrol grid place-items-center"><Icon name="cloud" size={20} /></div>
+        <h3 className="font-display text-[21px] text-heading mt-4">Your Google Drive is connected</h3>
+        <p className="text-[14.5px] text-muted mt-2">The app has created the folder “My Travel Planner” in your Drive. This device only has the sample trips. What should go into Drive?</p>
+        <div className="flex flex-col gap-2 mt-6">
+          <button className="btn btn-primary" onClick={() => sync.choice('empty')}>Start with an empty planner</button>
+          <button className="btn btn-ghost" onClick={() => sync.choice('upload')}>Keep the sample trips</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
-  const { data, reset } = useStore();
+  const { data, reset, sync } = useStore();
   const ui = useUI();
   const copyJson = () => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2))
@@ -1090,24 +1146,40 @@ function SettingsPage({ theme, setTheme }: { theme: string; setTheme: (t: string
         <Card title="Appearance" icon="moon">
           <Segmented value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'light', label: 'Light', icon: 'sun' }, { value: 'system', label: 'System', icon: 'monitor' }]} />
         </Card>
-        <Card title="Sync" icon="cloud">
-          <div className="flex items-start gap-3">
-            <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-cognac shrink-0" />
-            <div>
-              <div className="font-semibold text-ink">Stored on this device only</div>
-              <p className="text-[14px] text-muted mt-0.5">In the prototype, data lives in this browser. Syncing between your laptop and iPhone comes in a later phase.</p>
-              <button disabled className="btn btn-ghost mt-3 opacity-50 cursor-not-allowed"><Icon name="cloud" size={16} />Connect cloud storage</button>
+        <Card title="Google Drive" icon="cloud">
+          {!sync.connected ? (
+            <div className="flex items-start gap-3">
+              <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-cognac shrink-0" />
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">Not connected · stored on this device only</div>
+                <p className="text-[14px] text-muted mt-0.5">Connect your Google Drive to keep all trips in the folder “My Travel Planner” and sync them between your laptop and iPhone. This device keeps a full copy for offline use.</p>
+                <button className="btn btn-primary mt-3" onClick={sync.connect}><Icon name="cloud" size={16} />Connect Google Drive</button>
+                {sync.error && <p className="text-[13px] text-danger mt-2">{sync.error}</p>}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <span className={`mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 ${sync.status === 'error' ? 'bg-danger' : sync.status === 'idle' && !sync.pending ? 'bg-dot' : 'bg-cognac'}`} />
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">{syncLabel(sync)}</div>
+                <p className="text-[14px] text-muted mt-0.5">Your trips are stored in Google Drive › My Travel Planner › travel-data.json, with a daily backup in the Backups folder. Changes sync automatically when you’re online.</p>
+                {sync.status === 'error' && sync.error && <p className="text-[13px] text-danger mt-2 break-words">{sync.error}</p>}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button className="btn btn-primary" disabled={sync.status === 'syncing'} onClick={sync.syncNow}><Icon name="refresh" size={16} />Sync now</button>
+                  <button className="btn btn-ghost" onClick={() => ui.confirm({ title: 'Disconnect Google Drive?', text: 'Your trips stay in Google Drive and on this device, but this device stops syncing.', ok: 'Disconnect', onOk: () => { sync.disconnect(); ui.toast('Google Drive disconnected'); } })}>Disconnect</button>
+                </div>
+              </div>
+            </div>
+          )}
         </Card>
         <Card title="Data" icon="archive">
           <div className="text-[14px] text-muted mb-4">{plural(data.trips.length, 'trip', 'trips')} · {plural(data.activities.length, 'activity', 'activities')} · {plural(data.contacts.length, 'contact', 'contacts')}</div>
           <div className="flex flex-wrap gap-2">
             <button className="btn btn-ghost" onClick={copyJson}><Icon name="copy" size={16} />Copy data as JSON</button>
-            <button className="btn btn-danger" onClick={() => ui.confirm({ title: 'Restore sample data?', text: 'All your current changes will be replaced by the sample trips.', ok: 'Restore', onOk: () => { reset(); ui.toast('Sample data restored'); } })}><Icon name="undo" size={16} />Restore sample data</button>
+            {!sync.connected && <button className="btn btn-danger" onClick={() => ui.confirm({ title: 'Restore sample data?', text: 'All your current changes will be replaced by the sample trips.', ok: 'Restore', onOk: () => { reset(); ui.toast('Sample data restored'); } })}><Icon name="undo" size={16} />Restore sample data</button>}
           </div>
         </Card>
-        <p className="text-[12.5px] text-muted px-1">My Travel Planner · Prototype · All times are stored and shown in the local time of each place.</p>
+        <p className="text-[12.5px] text-muted px-1">My Travel Planner · All times are stored and shown in the local time of each place.</p>
       </div>
     </div>
   );
@@ -1641,9 +1713,7 @@ export function App() {
             </a>
           ))}
         </nav>
-        <div className="mt-auto px-6 py-6 text-[12px] text-white/55 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[#E8BB91]" />Saved on this device · Prototype
-        </div>
+        <div className="mt-auto px-4 py-5"><SyncBadge dark /></div>
       </aside>
 
       {/* Mobile brand bar */}
@@ -1652,7 +1722,7 @@ export function App() {
           <Icon name="compass" size={18} className="text-cognac" />
           <span className="font-display text-[16px]">My Travel Planner</span>
         </a>
-        <span className="text-[11px] text-muted flex items-center gap-1.5 font-semibold"><span className="h-1.5 w-1.5 rounded-full bg-cognac" />This device</span>
+        <SyncBadge />
       </div>
 
       <main className="lg:pl-64">
@@ -1683,6 +1753,7 @@ export function App() {
       {tripForm !== undefined && <TripForm trip={tripForm} onClose={() => setTripForm(undefined)} />}
       {contactForm !== undefined && <ContactForm contact={contactForm} onClose={() => setContactForm(undefined)} />}
       {confirmState && <ConfirmDialog state={confirmState} onClose={() => setConfirmState(null)} />}
+      <SyncPrompts />
 
       {toastMsg && (
         <div className="fixed z-[70] inset-x-0 flex justify-center px-4 pointer-events-none bottom-[calc(env(safe-area-inset-bottom,0px)+86px)] lg:bottom-8 lg:pl-64">
