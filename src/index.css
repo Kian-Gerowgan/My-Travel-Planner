@@ -6,15 +6,16 @@
   /* Layout: dark forest shell, cognac dates, petrol-blue stations on a vertical timeline.
      Dark is the default look; light stays available in Settings. */
   :root {
-    --nav: 19 45 39; --primary: 46 110 92; --heading: 214 232 224; --cognac: 216 161 112;
-    --petrol: 92 196 240; --petrolfill: 22 118 168; --pale: 21 41 52; --cream: 14 20 18;
-    --ink: 231 233 229; --card: 22 30 27; --muted: 146 157 152; --line: 40 51 48; --danger: 232 132 116;
-    --dot: 92 196 240;
-    --transport: 40 104 190; --transport-ink: 142 192 250;
-    --hotel: 170 100 44; --hotel-ink: 238 178 124;
-    --meeting: 160 34 116; --meeting-ink: 242 134 204;
-    --personal: 110 128 122; --personal-ink: 178 196 190;
-    --ta1: .52; --ta2: .10; --tb: .38;
+    --nav: 14 33 29; --primary: 22 96 80; --heading: 236 240 237; --cognac: 217 154 96;
+    --petrol: 50 159 255; --petrolfill: 22 139 223; --pale: 18 34 40; --cream: 9 17 15;
+    --ink: 236 240 237; --card: 16 26 23; --muted: 150 162 157; --line: 34 48 44; --danger: 232 132 116;
+    --dot: 50 159 255;
+    /* Event colour system: primary, highlight (borders, icons, text accents) and text ink */
+    --transport: 22 139 223; --transport-hi: 50 159 255; --transport-ink: 92 182 255;
+    --hotel: 185 120 63; --hotel-hi: 217 154 96; --hotel-ink: 229 172 120;
+    --meeting: 192 45 121; --meeting-hi: 235 76 155; --meeting-ink: 242 120 182;
+    --personal: 92 122 112; --personal-hi: 140 172 160; --personal-ink: 170 198 188;
+    --ta1: .34; --ta2: .03; --tb: .45; --tg: .55;
     color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
@@ -23,8 +24,8 @@
       --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
       --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
       --dot: 30 128 178;
-      --transport-ink: 28 86 165; --hotel-ink: 145 82 28; --meeting-ink: 148 28 104; --personal-ink: 82 98 92;
-      --ta1: .20; --ta2: .04; --tb: .28;
+      --transport-ink: 18 112 184; --hotel-ink: 150 92 42; --meeting-ink: 160 32 100; --personal-ink: 74 100 92;
+      --ta1: .20; --ta2: .03; --tb: .40; --tg: .25;
       color-scheme: light;
     }
   }
@@ -33,8 +34,8 @@
     --petrol: 30 128 178; --petrolfill: 30 128 178; --pale: 228 242 250; --cream: 247 244 238;
     --ink: 48 55 53; --card: 255 255 255; --muted: 100 108 105; --line: 231 225 214; --danger: 163 71 58;
     --dot: 30 128 178;
-    --transport-ink: 28 86 165; --hotel-ink: 145 82 28; --meeting-ink: 148 28 104; --personal-ink: 82 98 92;
-    --ta1: .20; --ta2: .04; --tb: .28;
+    --transport-ink: 18 112 184; --hotel-ink: 150 92 42; --meeting-ink: 160 32 100; --personal-ink: 74 100 92;
+    --ta1: .20; --ta2: .03; --tb: .40; --tg: .25;
     color-scheme: light;
   }
   html, body { background: rgb(var(--cream)); color: rgb(var(--ink)); }
@@ -68,16 +69,32 @@
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 }
 
-/* Stage colour families: a tinted, fading card per category.
+/* Event colour system: transparent cards that are strongest on the left and fade to the right.
    Kept outside @layer so Tailwind doesn't drop the dynamically chosen tone-* classes. */
-.tone-transport { --tc: var(--transport); --ti: var(--transport-ink); }
-.tone-hotel { --tc: var(--hotel); --ti: var(--hotel-ink); }
-.tone-meeting { --tc: var(--meeting); --ti: var(--meeting-ink); }
-.tone-personal { --tc: var(--personal); --ti: var(--personal-ink); }
-.tone-card { background: linear-gradient(125deg, rgb(var(--tc) / var(--ta1)) 0%, rgb(var(--tc) / var(--ta2)) 85%); border: 1px solid rgb(var(--tc) / var(--tb)); }
-.tone-card-strong { background: linear-gradient(125deg, rgb(var(--tc) / .95) 0%, rgb(var(--tc) / .55) 100%); border: 1px solid rgb(var(--ti) / .55); box-shadow: 0 0 0 3px rgb(var(--ti) / .18), 0 12px 36px rgb(0 0 0 / .32); }
+.tone-transport { --tc: var(--transport); --th: var(--transport-hi); --ti: var(--transport-ink); }
+.tone-hotel { --tc: var(--hotel); --th: var(--hotel-hi); --ti: var(--hotel-ink); }
+.tone-meeting { --tc: var(--meeting); --th: var(--meeting-hi); --ti: var(--meeting-ink); }
+.tone-personal { --tc: var(--personal); --th: var(--personal-hi); --ti: var(--personal-ink); }
+.tone-card {
+  background: linear-gradient(90deg, rgb(var(--tc) / var(--ta1)) 0%, rgb(var(--tc) / calc(var(--ta1) * .45)) 45%, rgb(var(--tc) / var(--ta2)) 100%);
+  border: 1px solid rgb(var(--th) / var(--tb));
+  box-shadow: inset 1px 0 0 rgb(var(--th) / .18), 0 8px 26px -14px rgb(var(--tc) / var(--tg));
+}
+.tone-card-strong {
+  background: linear-gradient(90deg, rgb(var(--tc) / .62) 0%, rgb(var(--tc) / .26) 55%, rgb(var(--tc) / .08) 100%);
+  border: 1px solid rgb(var(--th) / .75);
+  box-shadow: 0 0 0 3px rgb(var(--th) / .16), 0 12px 34px -10px rgb(var(--tc) / .7);
+}
 .tone-ink { color: rgb(var(--ti)); }
-.tone-tile { background: rgb(var(--tc) / .28); color: rgb(var(--ti)); }
-.tone-dot { background: rgb(var(--ti)); }
-.tone-dot-ring { border-color: rgb(var(--ti)); background: rgb(var(--cream)); }
-.tone-dot-fill { border-color: rgb(var(--ti)); background: rgb(var(--ti)); box-shadow: 0 0 0 4px rgb(var(--ti) / .25); }
+.tone-tile { background: rgb(var(--tc) / .26); color: rgb(var(--ti)); }
+.tone-icon { background: radial-gradient(circle at 35% 30%, rgb(var(--tc) / .55), rgb(var(--tc) / .22)); border: 1px solid rgb(var(--th) / .5); color: rgb(var(--th)); }
+.tone-dot { background: rgb(var(--th)); box-shadow: 0 0 8px rgb(var(--th) / .7); }
+.tone-dot-ring { border-color: rgb(var(--th)); background: rgb(var(--cream)); }
+.tone-dot-fill { border-color: rgb(var(--th)); background: rgb(var(--th)); box-shadow: 0 0 0 4px rgb(var(--th) / .22), 0 0 10px rgb(var(--th) / .7); }
+.tone-press { transition: transform .18s ease, filter .18s ease, box-shadow .18s ease; }
+.tone-press:hover { filter: brightness(1.12); }
+.tone-press:active { transform: scale(.985); }
+
+/* Cognac call-to-action (New trip) */
+.btn-cognac { background: linear-gradient(90deg, #B9783F, #D99A60); color: #fff; box-shadow: 0 8px 22px -8px rgb(185 120 63 / .65); }
+.btn-cognac:hover { filter: brightness(1.06); }

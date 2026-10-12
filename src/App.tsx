@@ -333,6 +333,7 @@ const ICONS: Record<string, string> = {
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
   image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
 };
 function Icon({ name, size = 18, className = '', stroke = 1.75 }: { name: string; size?: number; className?: string; stroke?: number }) {
@@ -535,64 +536,77 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 /* =========================================================================
    TIMELINE
    ========================================================================= */
+/** Short title/subtitle/badge for the compact event cards. */
+function compactView(e: Entry) {
+  const a = e.a, d = a.details || {};
+  const icon = TYPE_META[a.type].icon;
+  const withCode = (s?: string) => (s ? (code(s) !== place(s) ? `${place(s)} ${code(s)}` : place(s)) : '');
+  if (e.kind === 'arrival') return { icon: 'landing', title: `Arrival ${place(d.to)}`.trim(), sub: [d.flightNo || d.trainNo, d.from ? 'from ' + place(d.from) : ''].filter(Boolean).join(' · '), badge: '' };
+  if (e.kind === 'checkout') return { icon: 'logout', title: 'Check-out', sub: a.title, badge: '' };
+  switch (a.type) {
+    case 'flight': case 'train':
+      return { icon, title: d.to ? `${a.type === 'flight' ? 'Flight' : 'Train'} to ${place(d.to)}` : a.title, sub: d.from && d.to ? `${withCode(d.from)} → ${withCode(d.to)}` : d.airline || d.operator || '', badge: d.flightNo || d.trainNo || '' };
+    case 'hotel': {
+      const n = a.end ? daysBetween(a.start.slice(0, 10), a.end.slice(0, 10)) : 0;
+      return { icon, title: 'Check-in', sub: a.title, badge: n ? plural(n, 'night', 'nights') : '' };
+    }
+    case 'meeting': return { icon, title: a.title, sub: d.company || a.location || '', badge: '' };
+    case 'transfer': return { icon, title: a.title, sub: d.from && d.to ? `${place(d.from)} → ${place(d.to)}` : d.mode || '', badge: '' };
+    default: return { icon, title: a.title, sub: a.location || '', badge: '' };
+  }
+}
+
+/** One event as a compact, colour-coded card: icon · time | title / subtitle · badge › */
 function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; showTrip?: string }) {
   const ui = useUI();
   const { data } = useStore();
-  const v = entryView(e);
-  const a = e.a, d = a.details;
-  const names = e.kind === 'main' ? a.contactIds.map(id => data.contacts.find((c: Contact) => c.id === id)?.name).filter(Boolean) : [];
-  const shift = a.end ? daysBetween(a.start.slice(0, 10), a.end.slice(0, 10)) : 0;
+  const v = compactView(e);
+  const a = e.a;
   const docCount = e.kind === 'main' ? data.documents.filter((x: Doc) => x.activityIds.includes(a.id)).length : 0;
-  const sub = highlight ? 'text-white/75' : 'text-muted';
+  const sub = [showTrip, v.sub].filter(Boolean).join(' · ');
   return (
     <button onClick={() => ui.openActivity(a.id)}
-      className={`group w-full text-left rounded-2xl p-4 transition duration-200 tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong text-white' : 'tone-card hover:shadow-soft hover:-translate-y-px'} ${e.kind !== 'main' && !highlight ? 'opacity-80' : ''}`}>
-      {highlight && (
-        <div className="mb-2.5 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#F0C9A3] pulse-dot" />{nextLabel(e)}
-        </div>
+      className={`tone-press w-full flex items-center gap-2.5 rounded-[18px] pl-2 pr-2.5 py-2 text-left tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
+      <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0"><Icon name={v.icon} size={17} /></span>
+      <span className="w-[40px] shrink-0 leading-tight">
+        <span className="block tone-ink text-[14.5px] font-semibold tabular-nums">{e.time}</span>
+        {e.endTime && <span className="block tone-ink opacity-70 text-[11.5px] tabular-nums">{e.endTime}</span>}
+      </span>
+      <span className="w-px self-stretch my-0.5 bg-white/15" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-semibold text-ink truncate">{v.title}</span>
+        {sub && <span className="block text-[12.5px] tone-ink opacity-90 truncate">{sub}</span>}
+      </span>
+      {(docCount > 0 || a.notes.length > 0) && e.kind === 'main' && (
+        <span className="hidden md:flex items-center gap-2 text-[11.5px] text-ink/60 shrink-0">
+          {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
+          {a.notes.length > 0 && <span className="flex items-center gap-0.5" title="Notes"><Icon name="note" size={12} />{a.notes.length}</span>}
+        </span>
       )}
-      <div className="flex gap-3.5">
-        <div className={`h-10 w-10 rounded-xl grid place-items-center shrink-0 ${highlight ? 'bg-white/15 text-white' : 'tone-tile'}`}><Icon name={v.icon} size={19} /></div>
-        <div className="min-w-0 flex-1">
-          <div className={`text-[11px] uppercase tracking-[0.13em] font-bold ${highlight ? 'text-white/75' : 'tone-ink'}`}>{v.label}{showTrip ? ` · ${showTrip}` : ''}</div>
-          <div className={`font-semibold text-[16px] leading-snug mt-0.5 ${highlight ? '' : 'text-ink'}`}>{v.title}</div>
-          {v.lines.filter(Boolean).map((l, i) => <div key={i} className={`text-[13.5px] leading-snug mt-0.5 ${sub}`}>{l}</div>)}
-          {v.route && e.kind === 'main' && (
-            <div className={`mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] font-semibold ${highlight ? '' : 'tone-ink'}`}>
-              <span><span className="font-bold">{code(d.from)}</span> <span className="tabular-nums">{a.start.slice(11, 16)}</span></span>
-              <Icon name="arrow" size={14} className="opacity-60" />
-              <span><span className="font-bold">{code(d.to)}</span> <span className="tabular-nums">{a.end ? a.end.slice(11, 16) : '–'}</span>{shift > 0 && <sup className="ml-0.5 text-[10px]">+{shift}</sup>}</span>
-              {a.end && <span className={`flex items-center gap-1 text-[12px] font-normal ${sub}`}><Icon name="clock" size={12} />{durText(toUtc(a.end, a.endTz || a.startTz) - e.ms)}</span>}
-            </div>
-          )}
-          {(names.length > 0 || (e.kind === 'main' && (a.notes.length > 0 || docCount > 0))) && (
-            <div className={`mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] ${sub}`}>
-              {names.length > 0 && <span className="flex items-center gap-1.5"><Icon name="user" size={13} />{names.join(', ')}</span>}
-              {a.notes.length > 0 && <span className="flex items-center gap-1.5" title="Notes"><Icon name="note" size={13} />{a.notes.length}</span>}
-              {docCount > 0 && <span className="flex items-center gap-1.5" title="Documents"><Icon name="clip" size={13} />{docCount}</span>}
-            </div>
-          )}
-        </div>
-      </div>
+      {v.badge && <span className="text-[13px] font-medium text-ink/85 shrink-0 tabular-nums">{v.badge}</span>}
+      <Icon name="right" size={16} className="text-ink/60 shrink-0" />
     </button>
   );
 }
 
+/** A timeline row: category dot on a thin connecting line, then the event card. */
 function EntryRow({ e, next, last, showTrip }: { e: Entry; next?: Entry; last?: boolean; showTrip?: string }) {
   const isNext = !!next && next.key === e.key;
   const past = e.ms < Date.now() && !isNext && (!e.endMs || e.endMs < Date.now());
   return (
-    <div className={`relative flex gap-2.5 sm:gap-4 ${past ? 'opacity-55' : ''}`}>
-      <div className="w-[46px] sm:w-14 shrink-0 text-right pt-[15px]">
-        <div className="text-[15px] font-bold tabular-nums text-ink">{e.time}</div>
-        {e.endTime && <div className="text-[12.5px] text-muted tabular-nums">{e.endTime}</div>}
-      </div>
+    <div className={`relative flex gap-3 ${past ? 'opacity-55' : ''}`}>
       <div className="relative w-3 shrink-0 flex justify-center">
-        <div className={`absolute top-0 ${last ? 'h-6' : 'bottom-0'} w-px bg-petrol/30`} />
-        <div className={`relative mt-[20px] h-3 w-3 rounded-full border-2 tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot-ring'}`} />
+        <div className={`absolute top-0 ${last ? 'h-7' : 'bottom-0'} border-l border-dashed border-white/20`} />
+        <div className={`relative ${isNext ? 'mt-[46px]' : 'mt-[25px]'} h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
       </div>
-      <div className="flex-1 min-w-0 pb-3"><EntryCard e={e} highlight={isNext} showTrip={showTrip} /></div>
+      <div className="flex-1 min-w-0 pb-2.5">
+        {isNext && (
+          <div className={`mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] tone-ink tone-${toneOf(e.a.type)}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-current pulse-dot" />{nextLabel(e)}
+          </div>
+        )}
+        <EntryCard e={e} highlight={isNext} showTrip={showTrip} />
+      </div>
     </div>
   );
 }
@@ -783,46 +797,105 @@ function PageHead({ eyebrow, title, action }: { eyebrow?: string; title: string;
   );
 }
 
-function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number }) {
-  const ui = useUI();
-  const { duplicateTrip, setArchived, deleteTrip } = useStore();
-  const status = tripStatus(trip);
-  const days = daysBetween(trip.start, trip.end) + 1;
+/** "18 – 27 OCT 2026" */
+function rangeCaps(a: string, b: string) {
+  const mon = (s: string) => fmt(s, { month: 'short' }).toUpperCase();
+  if (a.slice(0, 7) === b.slice(0, 7)) return `${+a.slice(8)} – ${+b.slice(8)} ${mon(a)} ${a.slice(0, 4)}`;
+  if (a.slice(0, 4) === b.slice(0, 4)) return `${+a.slice(8)} ${mon(a)} – ${+b.slice(8)} ${mon(b)} ${a.slice(0, 4)}`;
+  return `${+a.slice(8)} ${mon(a)} ${a.slice(0, 4)} – ${+b.slice(8)} ${mon(b)} ${b.slice(0, 4)}`;
+}
+
+/** Destination tile in place of a photo: city code over a dusk gradient tinted by trip type. */
+function DestinationTile({ trip }: { trip: Trip }) {
+  const city = trip.cities[0] || trip.countries[0] || trip.name;
+  const tint = trip.kind === 'private' ? '217 154 96' : '50 159 255';
   return (
-    <div onClick={() => go(`#/trip/${trip.id}`)} role="link" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') go(`#/trip/${trip.id}`); }}
-      className="anim-in group relative cursor-pointer rounded-3xl bg-card p-5 sm:p-6 shadow-soft border border-line transition duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-petrol/40"
-      style={{ animationDelay: `${idx * 50}ms` }}>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-[13.5px] font-bold text-cognac tabular-nums">{fmtRange(trip.start, trip.end)}</div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px] font-bold ${STATUS[status].cls}`}>
-              {status === 'ongoing' && <span className="h-1.5 w-1.5 rounded-full bg-cognac pulse-dot" />}{STATUS[status].label}
-            </span>
-            <span className="rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold bg-cream text-muted">{trip.kind === 'business' ? 'Business' : 'Private'}</span>
-            {trip.archived && <span className="rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold bg-line text-muted">Archived</span>}
-          </div>
-        </div>
-        <Menu items={[
-          { label: 'Edit', icon: 'pencil', onClick: () => ui.editTrip(trip) },
-          { label: 'Duplicate', icon: 'copy', onClick: () => { duplicateTrip(trip.id); ui.toast('Trip duplicated'); } },
-          { label: trip.archived ? 'Restore from archive' : 'Archive', icon: 'archive', onClick: () => { setArchived(trip.id, !trip.archived); ui.toast(trip.archived ? 'Trip restored' : 'Trip archived'); } },
-          { label: 'Delete', icon: 'trash', danger: true, onClick: () => ui.confirm({ title: 'Delete trip?', text: `“${trip.name}” and all ${plural(count, 'activity', 'activities')} will be permanently deleted.`, ok: 'Delete', onOk: () => { deleteTrip(trip.id); ui.toast('Trip deleted'); } }) },
-        ]} />
-      </div>
-      <h3 className="font-display text-[21px] leading-tight text-heading mt-3">{trip.name}</h3>
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-petrol text-[15px] font-semibold">
-        {trip.cities.map((c, i) => <React.Fragment key={c + i}>{i > 0 && <Icon name="arrow" size={13} className="opacity-50" />}<span>{c}</span></React.Fragment>)}
-      </div>
-      <div className="mt-5 pt-4 border-t border-line flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px] text-muted">
-        <span className="flex items-center gap-1.5"><Icon name="globe" size={14} />{trip.countries.join(', ')}</span>
-        <span className="flex items-center gap-1.5"><Icon name="clock" size={14} />{plural(days, 'day', 'days')}</span>
-        <span className="flex items-center gap-1.5"><Icon name="list" size={14} />{plural(count, 'activity', 'activities')}</span>
-      </div>
+    <div className="relative h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 overflow-hidden rounded-2xl border border-white/10"
+      style={{ background: `radial-gradient(120% 90% at 80% 10%, rgb(${tint} / .55), transparent 60%), linear-gradient(165deg, #1b3340 0%, #13242a 45%, #0b1513 100%)` }}>
+      <svg viewBox="0 0 100 40" className="absolute bottom-0 left-0 w-full opacity-60" aria-hidden="true" preserveAspectRatio="none">
+        <path d="M0 40 V30 h6 v-8 h4 v8 h5 V18 h3 v-6 h2 v6 h3 v12 h6 V24 h5 v6 h4 V14 h2 V6 h2 v8 h2 v16 h6 v-9 h5 v9 h4 V20 h4 v10 h6 v-6 h5 v6 h5 V26 h4 v4 h3 V40 Z" fill="#06100e" />
+      </svg>
+      <div className="absolute left-2.5 top-2 text-[19px] font-bold tracking-[0.06em] text-white/90">{city.slice(0, 3).toUpperCase()}</div>
+      <div className="absolute left-2.5 top-[30px] text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/55 truncate max-w-[80px]">{trip.countries[0] || ''}</div>
     </div>
   );
 }
 
+function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number }) {
+  const ui = useUI();
+  const { data, duplicateTrip, setArchived, deleteTrip } = useStore();
+  const days = daysBetween(trip.start, trip.end) + 1;
+  const open = () => go(`#/trip/${trip.id}`);
+  // Preview: the next four events (or the first four of a past trip)
+  const entries = useMemo(() => buildEntries(data.activities.filter((a: Activity) => a.tripId === trip.id)), [data.activities, trip.id]);
+  const now = Date.now();
+  const upcoming = entries.filter(e => e.ms >= now || (e.endMs && e.endMs > now));
+  const preview = (upcoming.length ? upcoming : entries).slice(0, 4);
+  const next = findNext(entries);
+  const status = tripStatus(trip);
+  return (
+    <article className="anim-in min-w-0 overflow-hidden rounded-[24px] bg-card/90 border border-line p-3.5 sm:p-4 transition hover:border-white/15" style={{ animationDelay: `${idx * 50}ms` }}>
+      <div className="flex gap-4">
+        <button onClick={open} aria-label={`Open ${trip.name}`}><DestinationTile trip={trip} /></button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <button onClick={open} className="text-left min-w-0 pt-1">
+              <div className="text-[12px] font-bold tracking-[0.14em] text-cognac tabular-nums">{rangeCaps(trip.start, trip.end)}</div>
+              <h3 className="font-display text-[19px] sm:text-[21px] leading-tight text-heading mt-1">{trip.name}</h3>
+            </button>
+            <div className="-mr-1 -mt-0.5 shrink-0">
+              <Menu items={[
+                { label: 'Edit', icon: 'pencil', onClick: () => ui.editTrip(trip) },
+                { label: 'Duplicate', icon: 'copy', onClick: () => { duplicateTrip(trip.id); ui.toast('Trip duplicated'); } },
+                { label: trip.archived ? 'Restore from archive' : 'Archive', icon: 'archive', onClick: () => { setArchived(trip.id, !trip.archived); ui.toast(trip.archived ? 'Trip restored' : 'Trip archived'); } },
+                { label: 'Delete', icon: 'trash', danger: true, onClick: () => ui.confirm({ title: 'Delete trip?', text: `“${trip.name}” and all ${plural(count, 'activity', 'activities')} will be permanently deleted.`, ok: 'Delete', onOk: () => { deleteTrip(trip.id); ui.toast('Trip deleted'); } }) },
+              ]} />
+            </div>
+          </div>
+          <button onClick={open} className="block text-left w-full">
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[14px] text-muted">
+              {trip.cities.map((c, i) => <React.Fragment key={c + i}>{i > 0 && <Icon name="arrow" size={12} className="opacity-60" />}<span>{c}</span></React.Fragment>)}
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted">
+              <span className="flex items-center gap-1.5"><Icon name="globe" size={14} />{trip.countries.join(', ')}</span>
+              <span className="flex items-center gap-1.5"><Icon name="calendar" size={14} />{plural(days, 'day', 'days')}</span>
+              <span className="flex items-center gap-1.5"><Icon name="list" size={14} />{plural(count, 'activity', 'activities')}</span>
+              {status === 'ongoing' && <span className="flex items-center gap-1.5 text-cognac font-semibold"><span className="h-1.5 w-1.5 rounded-full bg-cognac pulse-dot" />Ongoing</span>}
+              {trip.archived && <span className="font-semibold">Archived</span>}
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {preview.length > 0 && (
+        <div className="mt-4">
+          {preview.map((e, i) => {
+            const firstOfDay = i === 0 || preview[i - 1].date !== e.date;
+            const isNext = !!next && next.key === e.key;
+            return (
+              <div key={e.key} className="grid grid-cols-[46px_14px_minmax(0,1fr)] gap-x-2 items-center">
+                <div className="text-[11px] font-semibold uppercase leading-tight text-muted tracking-wide">
+                  {firstOfDay && <>{fmt(e.date, { weekday: 'short' })}<br />{+e.date.slice(8)} {fmt(e.date, { month: 'short' })}</>}
+                </div>
+                <div className="relative self-stretch flex justify-center">
+                  <div className={`absolute ${i === 0 ? 'top-1/2' : 'top-0'} ${i === preview.length - 1 ? 'bottom-1/2' : 'bottom-0'} border-l border-dashed border-white/20`} />
+                  <div className={`relative self-center h-2.5 w-2.5 rounded-full tone-${toneOf(e.a.type)} ${isNext ? 'tone-dot-fill' : 'tone-dot'}`} />
+                </div>
+                <div className="py-1 min-w-0"><EntryCard e={e} highlight={isNext} /></div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button onClick={open} className="mt-3 w-full flex items-center gap-3 border-t border-line pt-3.5 pb-1 px-2 text-[14px] text-muted hover:text-ink transition">
+        <Icon name="list" size={17} />{count ? `View all ${plural(count, 'activity', 'activities')}` : 'Open trip'}<Icon name="right" size={16} className="ml-auto" />
+      </button>
+    </article>
+  );
+}
+
+/** The next upcoming event, as a large card in its category colour. */
 function NextUp() {
   const { data } = useStore();
   const ui = useUI();
@@ -830,22 +903,23 @@ function NextUp() {
   const entries = buildEntries(data.activities.filter((a: Activity) => live.includes(a.tripId)));
   const e = findNext(entries);
   if (!e) return null;
-  const v = entryView(e);
+  const v = compactView(e);
   const trip = data.trips.find((t: Trip) => t.id === e.a.tripId);
+  const tone = toneOf(e.a.type);
+  const where = [e.a.city || (e.a.type === 'flight' || e.a.type === 'train' ? place(e.a.details.from) : ''), trip?.countries[0]].filter(Boolean).join(' · ');
+  const when = e.ms <= Date.now() ? 'Happening now' : relText(e) === 'tomorrow' ? 'Tomorrow' : relText(e).replace(/^in /, 'In ');
   return (
-    <button onClick={() => ui.openActivity(e.a.id)} className="anim-in w-full text-left rounded-3xl bg-nav text-white p-5 sm:p-6 shadow-lift mb-10 relative overflow-hidden group border border-white/5">
-      <div className="absolute -right-10 -top-10 h-44 w-44 rounded-full border border-white/10" />
-      <div className="absolute -right-2 -top-20 h-44 w-44 rounded-full border border-white/5" />
-      <div className="relative flex items-center gap-1.5 text-[11.5px] uppercase tracking-[0.18em] text-[#E8BB91] font-bold">
-        <span className="h-1.5 w-1.5 rounded-full bg-[#E8BB91] pulse-dot" />{nextLabel(e)}
-      </div>
-      <div className="relative mt-3 flex items-center gap-4">
-        <div className="h-12 w-12 rounded-2xl bg-white/10 grid place-items-center shrink-0"><Icon name={v.icon} size={22} /></div>
-        <div className="min-w-0">
-          <div className="font-display text-[21px] sm:text-[23px] leading-tight">{v.title}</div>
-          <div className="text-white/70 text-[14px] mt-0.5">{fmtShort(e.date)} · {e.time}{e.endTime ? '–' + e.endTime : ''}{e.a.city ? ' · ' + e.a.city : ''} · {trip?.name}</div>
+    <button onClick={() => ui.openActivity(e.a.id)} className={`tone-press anim-in relative w-full overflow-hidden text-left rounded-[26px] p-5 tone-${tone} tone-card-strong`}>
+      <Icon name={TYPE_META[e.a.type].icon} size={150} stroke={1} className="absolute -right-6 -top-5 opacity-[0.10] text-white pointer-events-none" />
+      <div className="relative text-[12px] font-bold uppercase tracking-[0.24em] tone-ink">{when}</div>
+      <div className="relative mt-2.5 flex items-center gap-4">
+        <span className="tone-icon h-14 w-14 rounded-full grid place-items-center shrink-0"><Icon name={v.icon} size={24} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="font-display text-[21px] sm:text-[23px] leading-tight text-white">{v.title}</div>
+          <div className="text-[14.5px] text-white/75 mt-1">{fmtShort(e.date)} · {e.time}{e.endTime ? '–' + e.endTime : ''}</div>
+          {where && <div className="text-[14.5px] text-white/75">{where}</div>}
         </div>
-        <Icon name="right" className="ml-auto text-white/50 group-hover:text-white hidden sm:block" />
+        <span className="self-end h-10 w-10 rounded-full grid place-items-center tone-icon shrink-0"><Icon name="right" size={18} /></span>
       </div>
     </button>
   );
@@ -854,41 +928,86 @@ function NextUp() {
 function TripsPage() {
   const { data } = useStore();
   const ui = useUI();
-  const [showArchive, setShowArchive] = useState(false);
+  const [filter, setFilter] = useState<'upcoming' | 'past' | 'all'>(() => { try { return (localStorage.getItem('mtp:trip-filter') as any) || 'upcoming'; } catch { return 'upcoming'; } });
+  const [kind, setKind] = useState<'all' | 'business' | 'private'>('all');
+  const [showArchived, setShowArchived] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [q, setQ] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
+  useEffect(() => { try { localStorage.setItem('mtp:trip-filter', filter); } catch { /* ignore */ } }, [filter]);
+
   const counts: Record<string, number> = {};
   data.activities.forEach((a: Activity) => { counts[a.tripId] = (counts[a.tripId] || 0) + 1; });
-  const active = data.trips.filter((t: Trip) => !t.archived);
-  const groups = [
-    { key: 'ongoing', title: 'Ongoing', list: active.filter((t: Trip) => tripStatus(t) === 'ongoing').sort((a: Trip, b: Trip) => a.start.localeCompare(b.start)) },
-    { key: 'upcoming', title: 'Upcoming', list: active.filter((t: Trip) => tripStatus(t) === 'upcoming').sort((a: Trip, b: Trip) => a.start.localeCompare(b.start)) },
-    { key: 'completed', title: 'Completed', list: active.filter((t: Trip) => tripStatus(t) === 'completed').sort((a: Trip, b: Trip) => b.end.localeCompare(a.end)) },
-  ];
-  const archived = data.trips.filter((t: Trip) => t.archived);
-  let idx = 0;
+  const ql = q.trim().toLowerCase();
+  const list: Trip[] = data.trips
+    .filter((t: Trip) => showArchived || !t.archived)
+    .filter((t: Trip) => filter === 'all' || (filter === 'past' ? tripStatus(t) === 'completed' : tripStatus(t) !== 'completed'))
+    .filter((t: Trip) => kind === 'all' || t.kind === kind)
+    .filter((t: Trip) => !ql || [t.name, ...t.cities, ...t.countries].join(' ').toLowerCase().includes(ql))
+    .sort((a: Trip, b: Trip) => filter === 'past' ? b.end.localeCompare(a.end) : a.start.localeCompare(b.start));
+  const filtersActive = kind !== 'all' || showArchived;
+
   return (
     <div>
-      <PageHead eyebrow={fmt(todayStr(), { weekday: 'long', day: 'numeric', month: 'long' })} title="My Trips"
-        action={<button className="btn btn-primary" onClick={() => ui.editTrip(null)}><Icon name="plus" />New trip</button>} />
-      <NextUp />
-      {!data.trips.length && <Empty icon="globe" title="No trips yet" text="Create your first trip, then add flights, hotels and meetings." action={<button className="btn btn-primary" onClick={() => ui.editTrip(null)}><Icon name="plus" />New trip</button>} />}
-      <div className="space-y-10">
-        {groups.filter(g => g.list.length).map(g => (
-          <section key={g.key}>
-            <h2 className="text-[12.5px] font-bold uppercase tracking-[0.16em] text-heading mb-4 flex items-center gap-2">{g.title}<span className="text-muted font-semibold">{g.list.length}</span></h2>
-            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {g.list.map((t: Trip) => <TripCard key={t.id} trip={t} count={counts[t.id] || 0} idx={idx++} />)}
-            </div>
-          </section>
-        ))}
-        {archived.length > 0 && (
-          <section>
-            <button onClick={() => setShowArchive(s => !s)} className="text-[12.5px] font-bold uppercase tracking-[0.16em] text-muted mb-4 flex items-center gap-2 hover:text-heading">
-              <Icon name="archive" size={15} />Archive<span className="font-semibold">{archived.length}</span><Icon name="down" size={15} className={`transition ${showArchive ? 'rotate-180' : ''}`} />
-            </button>
-            {showArchive && <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{archived.map((t: Trip) => <TripCard key={t.id} trip={t} count={counts[t.id] || 0} idx={0} />)}</div>}
-          </section>
-        )}
+      <section className="mb-8">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-[12.5px] font-bold uppercase tracking-[0.24em] text-muted">Next up</h2>
+          <span className="text-[14px] text-muted">{fmt(todayStr(), { weekday: 'short', day: 'numeric', month: 'long' })}</span>
+        </div>
+        <NextUp />
+      </section>
+
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h1 className="font-display text-[32px] sm:text-[36px] leading-none text-heading">My Trips</h1>
+        <button className="btn btn-cognac h-11 px-5" onClick={() => ui.editTrip(null)}><Icon name="plus" size={18} />New trip</button>
       </div>
+
+      <div className="flex items-center gap-2 mb-5">
+        <div className="inline-flex rounded-full bg-card border border-line p-1">
+          {([['upcoming', 'Upcoming'], ['past', 'Past'], ['all', 'All trips']] as const).map(([k, label], i) => (
+            <React.Fragment key={k}>
+              {i > 0 && filter !== k && filter !== (['upcoming', 'past', 'all'] as const)[i - 1] && <span className="w-px my-2 bg-line" />}
+              <button onClick={() => setFilter(k)} aria-pressed={filter === k} className={`h-9 px-3.5 sm:px-4 rounded-full text-[14px] font-semibold whitespace-nowrap transition ${filter === k ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-ink'}`}>{label}</button>
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => { setSearching(s => !s); if (searching) setQ(''); }} aria-label="Search trips" aria-pressed={searching} className={`h-11 w-11 rounded-full grid place-items-center border transition ${searching ? 'bg-primary border-primary text-white' : 'bg-card border-line text-ink hover:border-white/20'}`}><Icon name="search" size={18} /></button>
+          <div className="relative">
+            <button onClick={() => setFilterOpen(o => !o)} aria-label="Filter trips" aria-expanded={filterOpen} className={`h-11 w-11 rounded-full grid place-items-center border transition ${filtersActive ? 'bg-primary border-primary text-white' : 'bg-card border-line text-ink hover:border-white/20'}`}><Icon name="sliders" size={18} /></button>
+            {filterOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setFilterOpen(false)} />
+                <div className="absolute right-0 top-12 z-40 w-56 rounded-2xl bg-card border border-line shadow-lift p-2 anim-fade">
+                  <div className="px-2 pt-1 pb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Trip type</div>
+                  {([['all', 'All trips'], ['business', 'Business'], ['private', 'Private']] as const).map(([k, label]) => (
+                    <button key={k} onClick={() => setKind(k)} className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-[14px] text-ink hover:bg-pale">{label}{kind === k && <Icon name="check" size={16} className="text-petrol" />}</button>
+                  ))}
+                  <div className="my-1.5 border-t border-line" />
+                  <button onClick={() => setShowArchived(s => !s)} className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-[14px] text-ink hover:bg-pale">Show archived{showArchived && <Icon name="check" size={16} className="text-petrol" />}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {searching && (
+        <div className="relative mb-5 anim-fade">
+          <Icon name="search" size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
+          <input id="trip-search" autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search trips, cities or countries" className="inp pl-10 rounded-full" />
+        </div>
+      )}
+
+      {!data.trips.length ? (
+        <Empty icon="globe" title="No trips yet" text="Create your first trip, then add flights, hotels and meetings." action={<button className="btn btn-cognac" onClick={() => ui.editTrip(null)}><Icon name="plus" />New trip</button>} />
+      ) : !list.length ? (
+        <Empty icon="search" title={ql ? 'No matching trips' : filter === 'past' ? 'No past trips' : 'No upcoming trips'} text={ql ? 'Try a different search.' : 'Switch to “All trips” or create a new one.'} />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {list.map((t, i) => <TripCard key={t.id} trip={t} count={counts[t.id] || 0} idx={i} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1356,6 +1475,33 @@ function SyncBadge({ dark = false }: { dark?: boolean }) {
   );
 }
 
+/** Round cognac app mark with a plane. */
+function AppLogo({ size = 44 }: { size?: number }) {
+  return (
+    <span className="rounded-full grid place-items-center shrink-0 text-[#1a1009] shadow-[0_6px_18px_-6px_rgb(185_120_63/.7)]"
+      style={{ width: size, height: size, background: 'radial-gradient(circle at 32% 28%, #ECB27A 0%, #C98846 45%, #8C5426 100%)' }}>
+      <Icon name="plane" size={Math.round(size * 0.48)} stroke={2.2} />
+    </span>
+  );
+}
+
+const PROFILE_KEY = 'mtp:profile-name';
+const profileName = () => { try { return localStorage.getItem(PROFILE_KEY) ?? 'Kian Gerowgan'; } catch { return 'Kian Gerowgan'; } };
+
+/** Header button showing Google Drive sync status; tap to sync (or set up). */
+function SyncButton() {
+  const { sync } = useStore();
+  const ok = sync.connected && sync.status === 'idle' && !sync.pending;
+  const dot = !sync.connected ? 'bg-cognac' : sync.status === 'error' ? 'bg-danger' : ok ? 'bg-dot' : 'bg-cognac';
+  return (
+    <button onClick={() => (sync.connected ? sync.syncNow() : go('#/settings'))} aria-label={sync.connected ? syncLabel(sync) : 'Connect Google Drive'} title={sync.connected ? syncLabel(sync) : 'Saved on this device · tap to connect Google Drive'}
+      className="relative h-11 w-11 rounded-full grid place-items-center bg-card border border-line text-ink">
+      <Icon name={sync.status === 'syncing' ? 'refresh' : 'cloud'} size={19} className={sync.status === 'syncing' ? 'animate-spin' : ''} />
+      <span className={`absolute top-2 right-2 h-2.5 w-2.5 rounded-full ring-2 ring-[rgb(var(--card))] ${dot}`} />
+    </button>
+  );
+}
+
 function SyncPrompts() {
   const { sync } = useStore();
   const ui = useUI();
@@ -1394,6 +1540,11 @@ function SettingsPage({ theme, setTheme }: { theme: string; setTheme: (t: string
     <div className="max-w-2xl">
       <PageHead title="Settings" />
       <div className="space-y-4">
+        <Card title="Profile" icon="user">
+          <label className="block max-w-sm"><span className="lbl">Your name (initials appear in the header)</span>
+            <input id="profile-name" className="inp" defaultValue={profileName()} onChange={e => { try { localStorage.setItem(PROFILE_KEY, e.target.value); } catch { /* ignore */ } }} />
+          </label>
+        </Card>
         <Card title="Appearance" icon="moon">
           <Segmented value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'light', label: 'Light', icon: 'sun' }, { value: 'system', label: 'System', icon: 'monitor' }]} />
         </Card>
@@ -1899,10 +2050,10 @@ function ConfirmDialog({ state, onClose }: { state: any; onClose: () => void }) 
    SHELL
    ========================================================================= */
 const NAV = [
-  { key: 'trips', label: 'Trips', icon: 'globe', href: '#/trips' },
+  { key: 'trips', label: 'Trips', icon: 'plane', href: '#/trips' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar', href: '#/calendar' },
   { key: 'contacts', label: 'Contacts', icon: 'users', href: '#/contacts' },
-  { key: 'settings', label: 'Settings', icon: 'sliders', href: '#/settings' },
+  { key: 'settings', label: 'Settings', icon: 'gear', href: '#/settings' },
 ];
 
 function useTheme() {
@@ -1958,37 +2109,42 @@ export function App() {
     <UICtx.Provider value={ui}>
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 bg-nav text-white flex-col z-30 border-r border-white/5">
-        <a href="#/trips" className="px-6 pt-8 pb-10 block">
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-white/10 grid place-items-center text-[#E8BB91]"><Icon name="compass" size={19} /></div>
+        <a href="#/trips" className="px-5 pt-8 pb-10 block">
+          <div className="flex items-center gap-3">
+            <AppLogo size={42} />
             <div>
-              <div className="font-display text-[18.7px] leading-none">My Travel Planner</div>
-              <div className="text-[10.5px] uppercase tracking-[0.18em] text-white/50 mt-1.5 font-semibold">Travel organizer</div>
+              <div className="font-display text-[18.7px] leading-tight">My Travel Planner</div>
+              <div className="text-[12px] text-white/55 mt-0.5">Plan. Organize. Explore.</div>
             </div>
           </div>
         </a>
         <nav className="px-3 space-y-1">
           {NAV.map(n => (
             <a key={n.key} href={n.href} aria-current={active === n.key ? 'page' : undefined}
-              className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14.5px] font-semibold transition ${active === n.key ? 'bg-white/10 text-white' : 'text-white/60 hover:text-white hover:bg-white/5'}`}>
+              className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14.5px] font-semibold transition ${active === n.key ? 'bg-primary/60 text-white' : 'text-white/60 hover:text-white hover:bg-white/5'}`}>
               <Icon name={n.icon} size={18} />{n.label}
-              {active === n.key && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#E8BB91]" />}
             </a>
           ))}
         </nav>
         <div className="mt-auto px-4 py-5"><SyncBadge dark /></div>
       </aside>
 
-      {/* Mobile brand bar */}
       {/* Solid strip behind the iPhone status bar (clock, battery) so scrolling content doesn't run under it */}
       <div className="lg:hidden fixed top-0 inset-x-0 z-[45] bg-cream h-[env(safe-area-inset-top,0px)]" aria-hidden="true" />
-      <div className="lg:hidden flex items-center justify-between px-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] pb-1">
-        <a href="#/trips" className="flex items-center gap-2 text-heading">
-          <Icon name="compass" size={18} className="text-cognac" />
-          <span className="font-display text-[20px]">My Travel Planner</span>
+      {/* Mobile header: logo, name and tagline; sync status and profile on the right */}
+      <header className="lg:hidden flex items-center gap-3 px-4 pt-[calc(env(safe-area-inset-top,0px)+14px)] pb-3">
+        <a href="#/trips" className="flex items-center gap-3 min-w-0">
+          <AppLogo size={46} />
+          <span className="min-w-0">
+            <span className="block font-display text-[20px] leading-tight text-heading truncate">My Travel Planner</span>
+            <span className="block text-[12.5px] text-muted">Plan. Organize. Explore.</span>
+          </span>
         </a>
-        <SyncBadge />
-      </div>
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <SyncButton />
+          <a href="#/settings" aria-label="Settings" className="h-11 w-11 rounded-full grid place-items-center bg-card border border-line text-[14px] font-semibold text-ink">{initials(profileName()) || <Icon name="user" size={18} />}</a>
+        </div>
+      </header>
 
       <main className="lg:pl-64">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-10 pt-[10px] sm:pt-5 lg:pt-12 pb-32 lg:pb-16">
@@ -2000,12 +2156,12 @@ export function App() {
         </div>
       </main>
 
-      {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-nav text-white pb-[env(safe-area-inset-bottom,0px)] border-t border-white/5 shadow-[0_-8px_30px_rgb(0_0_0/.3)]">
-        <div className="grid grid-cols-4 h-[66px]">
+      {/* Mobile bottom navigation: translucent dark green, active tab highlighted */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 rounded-t-[26px] bg-nav/85 backdrop-blur-xl border-t border-white/10 text-white pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-10px_30px_rgb(0_0_0/.35)]">
+        <div className="grid grid-cols-4 gap-1 px-3 pt-2.5 pb-2">
           {NAV.map(n => (
-            <a key={n.key} href={n.href} aria-current={active === n.key ? 'page' : undefined} className={`flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition ${active === n.key ? 'text-white' : 'text-white/55'}`}>
-              <span className={`grid place-items-center h-8 w-12 rounded-full transition ${active === n.key ? 'bg-white/10' : ''}`}><Icon name={n.icon} size={20} /></span>
+            <a key={n.key} href={n.href} aria-current={active === n.key ? 'page' : undefined} className={`flex flex-col items-center justify-center gap-1 text-[12px] font-medium transition ${active === n.key ? 'text-white' : 'text-white/55 hover:text-white/80'}`}>
+              <span className={`grid place-items-center h-9 w-full max-w-[86px] rounded-2xl transition ${active === n.key ? 'bg-primary/80' : ''}`}><Icon name={n.icon} size={21} /></span>
               {n.label}
             </a>
           ))}
@@ -2036,4 +2192,3 @@ export function App() {
     </UICtx.Provider>
   );
 }
-
