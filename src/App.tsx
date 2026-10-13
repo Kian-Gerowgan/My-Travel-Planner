@@ -17,6 +17,7 @@ interface Activity {
   city?: string; location?: string;
   details: Record<string, string>;
   contactIds: string[]; notes: Note[]; tasks: Task[];
+  status?: BookingStatus;   // confirmed (default) · pending · planned (not booked yet)
 }
 interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
@@ -136,10 +137,10 @@ const FORM: Record<ActivityType, { title: string; titlePh: string; start: string
     { key: 'from', label: 'From station', ph: 'Frankfurt (Main) Hbf' }, { key: 'to', label: 'To station', ph: 'Munich Hbf' },
     { key: 'seat', label: 'Coach / seat' }, { key: 'bookingRef', label: 'Booking reference' } ] },
   hotel: { title: 'Hotel name', titlePh: 'e.g. JW Marriott Shanghai', start: 'Check-in', end: 'Check-out', city: true, fields: [
-    { key: 'address', label: 'Address', wide: true }, { key: 'phone', label: 'Phone', type: 'tel' },
+    { key: 'address', label: 'Address', wide: true }, { key: 'nameLocal', label: 'Hotel name in local language', ph: 'e.g. 新锦江大酒店' }, { key: 'addressLocal', label: 'Address in local language (for taxi)', ph: 'e.g. 上海市黄浦区长乐路161号', wide: true }, { key: 'phone', label: 'Phone', type: 'tel' },
     { key: 'bookingRef', label: 'Booking number' }, { key: 'room', label: 'Room', wide: true } ] },
   meeting: { title: 'Title', titlePh: 'e.g. Supplier meeting', start: 'Start', end: 'End', city: true, location: 'Location / address', fields: [
-    { key: 'company', label: 'Company' }, { key: 'contactPhone', label: 'Phone', type: 'tel' },
+    { key: 'company', label: 'Company' }, { key: 'addressLocal', label: 'Address in local language (for taxi)', wide: true }, { key: 'contactPhone', label: 'Phone', type: 'tel' },
     { key: 'contactEmail', label: 'Email', type: 'email' }, { key: 'agenda', label: 'Agenda', type: 'textarea', wide: true } ] },
   transfer: { title: 'Label', titlePh: 'Generated automatically', start: 'Pickup', end: 'Arrival (optional)', city: true, fields: [
     { key: 'mode', label: 'Transport', ph: 'Taxi, driver, shuttle …' }, { key: 'provider', label: 'Driver / provider' },
@@ -588,6 +589,7 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="tone-ink text-[14px] font-semibold tabular-nums">{v.time}</span>
+          {e.kind === 'main' && <StatusPill s={a.status} />}
           {(docCount > 0 || (a.notes.length > 0 && e.kind === 'main')) && (
             <span className="flex items-center gap-2 text-[11.5px] text-ink/55">
               {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
@@ -1181,6 +1183,7 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
   const status = tripStatus(trip);
   const days = daysBetween(trip.start, trip.end) + 1;
   const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id && !d.cover).length;
+  const todoCount = tripTodos(trip, acts).count;
   const td = todayStr();
 
   return (
@@ -1214,20 +1217,252 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
       </div>
 
       <div className="sticky top-[env(safe-area-inset-top,0px)] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mt-5 mb-6 bg-cream/90 backdrop-blur-md border-b border-line flex items-center justify-between gap-3">
-        <Segmented value={tab} onChange={t => go(`#/trip/${trip.id}/${t}`)} options={[
+        <div className="min-w-0 overflow-x-auto no-scrollbar"><Segmented value={tab} onChange={t => go(`#/trip/${trip.id}/${t}`)} options={[
           { value: 'timeline', label: 'Timeline', icon: 'list' },
+          { value: 'today', label: 'Today', icon: 'clock' },
           { value: 'calendar', label: 'Calendar', icon: 'calendar' },
-          { value: 'documents', label: `Documents${docCount ? ` (${docCount})` : ''}`, icon: 'file' },
-        ]} />
+          { value: 'documents', label: `Docs${docCount ? ` ${docCount}` : ''}`, icon: 'file' },
+          { value: 'todos', label: `To-dos${todoCount ? ` ${todoCount}` : ''}`, icon: 'check' },
+        ]} /></div>
         <button onClick={() => ui.newActivity(trip.id)} className="hidden md:inline-flex btn btn-primary h-10"><Icon name="plus" />Activity</button>
       </div>
 
       {tab === 'timeline' && <div className="max-w-3xl"><Timeline trip={trip} acts={acts} entries={entries} /></div>}
       {tab === 'calendar' && <CalendarView entries={entries} initialDate={td >= trip.start && td <= trip.end ? td : trip.start} ranges={[trip]} />}
       {tab === 'documents' && <TripDocuments trip={trip} acts={acts} entries={entries} />}
+      {tab === 'today' && <TripToday key={trip.id} trip={trip} acts={acts} entries={entries} />}
+      {tab === 'todos' && <TripTodos trip={trip} acts={acts} entries={entries} />}
 
-      {tab !== 'documents' && (
+      {(tab === 'timeline' || tab === 'calendar') && (
         <button onClick={() => ui.newActivity(trip.id)} aria-label="Add activity" className="md:hidden fixed right-5 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-30 h-14 w-14 rounded-full bg-primary text-white grid place-items-center shadow-lift active:scale-95 transition"><Icon name="plus" size={24} stroke={2} /></button>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================================
+   BOOKING STATUS · TAXI CARD · TODAY · TO-DOS
+   ========================================================================= */
+type BookingStatus = 'confirmed' | 'pending' | 'planned';
+const BOOKING: Record<BookingStatus, { label: string; cls: string }> = {
+  confirmed: { label: 'Confirmed', cls: 'bg-dot/15 text-dot' },
+  pending: { label: 'Pending', cls: 'bg-cognac/20 text-cognac' },
+  planned: { label: 'Not booked', cls: 'bg-danger/15 text-danger' },
+};
+/** Small badge on cards; confirmed bookings stay quiet. */
+function StatusPill({ s, always = false }: { s?: BookingStatus; always?: boolean }) {
+  if (!s || (s === 'confirmed' && !always)) return null;
+  return <span className={`rounded-full px-1.5 py-[1px] text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${BOOKING[s].cls}`}>{BOOKING[s].label}</span>;
+}
+
+/** Where a driver should take you for this stage, preferring the local-language name and address. */
+function taxiTarget(a: Activity) {
+  const d = a.details || {};
+  const chinese = (s?: string) => (s || '').match(/\(([^)]*[㐀-鿿][^)]*)\)/)?.[1] || '';
+  if (a.type === 'train' || a.type === 'flight') {
+    if (!d.from) return null;
+    const local = chinese(d.from);
+    return { title: a.type === 'train' ? 'Departure station' : 'Departure airport', name: place(d.from), nameLocal: local ? (a.type === 'train' && !/站$/.test(local) ? local + '站' : local) : '', address: '', addressLocal: '', phone: '' };
+  }
+  if (a.type === 'transfer') {
+    if (!d.to) return null;
+    return { title: 'Destination', name: place(d.to), nameLocal: chinese(d.to), address: '', addressLocal: '', phone: d.phone || '' };
+  }
+  const address = d.address || a.location || '';
+  if (!address && !d.addressLocal) return null;
+  return { title: a.type === 'hotel' ? 'Hotel' : 'Destination', name: a.title, nameLocal: d.nameLocal || '', address, addressLocal: d.addressLocal || chinese(address), phone: d.phone || d.contactPhone || '' };
+}
+
+/** Full-screen, high-contrast card to show a taxi driver; opens the address in Apple Maps or Amap. */
+function TaxiCard({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data } = useStore();
+  const ui = useUI();
+  const a: Activity | undefined = data.activities.find((x: Activity) => x.id === id);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    scrollLocks++; document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', h); scrollLocks--; if (!scrollLocks) document.body.style.overflow = ''; };
+  }, []);
+  const t = a ? taxiTarget(a) : null;
+  if (!a || !t) return null;
+  const query = t.addressLocal || t.nameLocal || [t.name, t.address].filter(Boolean).join(', ');
+  const q = encodeURIComponent(query);
+  const copy = () => navigator.clipboard.writeText([t.nameLocal, t.addressLocal, t.name, t.address].filter(Boolean).join('\n')).then(() => ui.toast('Address copied')).catch(() => ui.toast('Copying isn’t supported here'));
+  return (
+    <div className="fixed inset-0 z-[85] flex flex-col bg-[#FBFAF6] text-[#141414] anim-fade" role="dialog" aria-modal="true" aria-label="Show to driver">
+      <div className="flex items-center gap-2 px-4 pt-[calc(env(safe-area-inset-top,0px)+12px)] pb-2">
+        <button onClick={onClose} aria-label="Close" className="h-11 w-11 grid place-items-center rounded-full bg-black/5 text-[#141414]"><Icon name="x" /></button>
+        <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-black/45">Please take me to · 请带我去</div>
+      </div>
+      <div className="flex-1 overflow-auto px-6 py-6 flex flex-col justify-center gap-5">
+        <div className="text-[12px] font-bold uppercase tracking-[0.16em] text-[#9a6230]">{t.title}</div>
+        {t.nameLocal && <div className="text-[40px] leading-[1.15] font-bold">{t.nameLocal}</div>}
+        {t.addressLocal && <div className="text-[30px] leading-[1.3] font-semibold">{t.addressLocal}</div>}
+        <div className="h-px bg-black/10" />
+        <div className="text-[20px] font-semibold">{t.name}</div>
+        {t.address && <div className="text-[17px] text-black/65 leading-snug">{t.address}</div>}
+        {t.phone && <a href={`tel:${t.phone.replace(/\s/g, '')}`} className="text-[17px] font-semibold text-[#1170b8]">☎ {t.phone}</a>}
+        {!t.nameLocal && !t.addressLocal && <p className="text-[14px] text-black/50">No Chinese address saved yet. Add it under Edit → “Address in local language”.</p>}
+      </div>
+      <div className="grid grid-cols-3 gap-2 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+14px)] border-t border-black/10">
+        <a href={`https://maps.apple.com/?q=${q}`} target="_blank" rel="noopener" className="btn h-12 bg-[#141414] text-white text-[14px]">Apple Maps</a>
+        <a href={`https://uri.amap.com/search?keyword=${q}&callnative=1`} target="_blank" rel="noopener" className="btn h-12 bg-[#1170b8] text-white text-[14px]">Amap 高德</a>
+        <button onClick={copy} className="btn h-12 bg-black/5 text-[#141414] text-[14px]">Copy</button>
+      </div>
+    </div>
+  );
+}
+
+/** One day of the trip at a glance: the day's stages, the next one highlighted, and tonight's hotel. */
+function TripToday({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
+  const ui = useUI();
+  const td = todayStr();
+  const inTrip = td >= trip.start && td <= trip.end;
+  const [day, setDay] = useState(inTrip ? td : td < trip.start ? trip.start : trip.end);
+  const list = entries.filter(e => e.date === day);
+  const next = findNext(entries);
+  const hotel = hotelFor(acts, day);
+  const cities = dayCities(acts, list, day);
+  const idx = daysBetween(trip.start, day) + 1;
+  const total = daysBetween(trip.start, trip.end) + 1;
+  const hotelTaxi = hotel ? taxiTarget(hotel) : null;
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={() => setDay(addDays(day, -1))} disabled={day <= trip.start} aria-label="Previous day" className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-card border border-line text-heading disabled:opacity-30"><Icon name="left" /></button>
+        <div className="flex-1 min-w-0 text-center">
+          <div className="text-[11.5px] font-bold uppercase tracking-[0.16em] text-cognac">{day === td ? 'Today' : fmt(day, { weekday: 'long' })} · Day {idx} of {total}</div>
+          <div className="font-display text-[24px] leading-tight text-cognac">{fmtDM(day)}</div>
+          {cities.length > 0 && <div className="text-[12.5px] font-bold uppercase tracking-[0.12em] text-heading mt-0.5 truncate">{cities.join(' → ')}</div>}
+        </div>
+        <button onClick={() => setDay(addDays(day, 1))} disabled={day >= trip.end} aria-label="Next day" className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-card border border-line text-heading disabled:opacity-30"><Icon name="right" /></button>
+      </div>
+      {!inTrip && td < trip.start && <p className="mb-4 text-center text-[13px] text-muted">Your trip starts in {plural(daysBetween(td, trip.start), 'day', 'days')}. During the trip, this page opens on the current day.</p>}
+
+      {list.length ? list.map((e, j) => <EntryRow key={e.key} e={e} next={next} last={j === list.length - 1} />)
+        : <Empty icon="calendar" title="Nothing planned" text="No stages on this day." action={<button className="btn btn-primary" onClick={() => ui.newActivity(trip.id, day)}><Icon name="plus" />Add activity</button>} />}
+
+      {hotel && (
+        <section className="mt-7">
+          <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-2.5 flex items-center gap-2"><Icon name="bed" size={15} />Tonight</h3>
+          <div className="tone-hotel tone-card rounded-2xl p-4">
+            <button onClick={() => ui.openActivity(hotel.id)} className="block text-left w-full">
+              <div className="text-[16px] font-semibold text-ink">{hotel.title}</div>
+              {hotel.details.address && <div className="text-[13px] tone-ink mt-0.5">{hotel.details.address}</div>}
+            </button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {hotelTaxi && <button onClick={() => ui.taxi(hotel.id)} className="btn h-10 px-4 bg-cognac text-[#1a1009] text-[14px]"><Icon name="car" size={16} />Show to driver</button>}
+              {hotel.details.phone && <a href={`tel:${hotel.details.phone.replace(/\s/g, '')}`} className="btn btn-ghost h-10 px-4 text-[14px]"><Icon name="phone" size={15} />Call hotel</a>}
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** Everything still open for a trip: missing nights, unconfirmed bookings, tasks and warnings. */
+function tripTodos(trip: Trip, acts: Activity[]) {
+  const sorted = [...acts].sort((a, b) => toUtc(a.start, a.startTz) - toUtc(b.start, b.startTz));
+  const gapDays: string[] = [];
+  for (let d = trip.start; d < trip.end; d = addDays(d, 1)) {
+    if (hotelFor(acts, d)) continue;
+    const onBoard = acts.some(a => (a.type === 'flight' || a.type === 'train') && a.end && a.start.slice(0, 10) <= d && a.end.slice(0, 10) > d);
+    if (!onBoard) gapDays.push(d);
+  }
+  const gaps: { from: string; to: string }[] = [];
+  gapDays.forEach(d => { const last = gaps[gaps.length - 1]; if (last && addDays(last.to, 1) === d) last.to = d; else gaps.push({ from: d, to: d }); });
+  const unconfirmed = sorted.filter(a => a.status === 'planned' || a.status === 'pending');
+  const tasks = sorted.flatMap(a => a.tasks.map(t => ({ a, t })));
+  const warnings = sorted.flatMap(a => a.notes.filter(n => n.text.trim().startsWith('⚠')).map(n => ({ a, n })));
+  const count = gaps.length + unconfirmed.length + tasks.filter(x => !x.t.done).length;
+  return { gaps, unconfirmed, tasks, warnings, count };
+}
+
+function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
+  const { updateActivity } = useStore();
+  const ui = useUI();
+  const [showDone, setShowDone] = useState(false);
+  const { gaps, unconfirmed, tasks, warnings } = tripTodos(trip, acts);
+  const open = tasks.filter(x => !x.t.done), done = tasks.filter(x => x.t.done);
+  // Where you are that night: the destination of the last flight/train that arrived by then, else the day's last city.
+  const cityFor = (d: string) => {
+    const arrived = acts.filter(a => (a.type === 'flight' || a.type === 'train') && a.end && a.end.slice(0, 10) <= d && a.details.to)
+      .sort((a, b) => toUtc(a.end!, a.endTz || a.startTz) - toUtc(b.end!, b.endTz || b.startTz)).pop();
+    return arrived ? place(arrived.details.to) : dayCities(acts, entries.filter(e => e.date === d), d).slice(-1)[0] || '';
+  };
+  const ActRef = ({ a }: { a: Activity }) => (
+    <button onClick={() => ui.openActivity(a.id)} className={`tone-${toneOf(a.type)} flex items-center gap-1.5 text-[12.5px] tone-ink hover:underline text-left`}>
+      <Icon name={TYPE_META[a.type].icon} size={12} />{fmtShort(a.start.slice(0, 10))} · {a.title}
+    </button>
+  );
+  const toggle = (a: Activity, tid: string) => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(t => t.id === tid ? { ...t, done: !t.done } : t) }));
+  const Section = ({ title, icon, children }: any) => (
+    <section>
+      <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-3 flex items-center gap-2"><Icon name={icon} size={15} />{title}</h3>
+      <div className="space-y-2">{children}</div>
+    </section>
+  );
+  if (!gaps.length && !unconfirmed.length && !open.length && !warnings.length) {
+    return <div className="max-w-3xl"><Empty icon="check" title="All set" text="No missing hotels, no unconfirmed bookings and no open tasks for this trip." /></div>;
+  }
+  return (
+    <div className="max-w-3xl space-y-8">
+      {gaps.length > 0 && (
+        <Section title="No accommodation" icon="bed">
+          {gaps.map(g => (
+            <div key={g.from} className="flex items-center gap-3 rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3">
+              <Icon name="bed" size={18} className="text-danger shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] font-semibold text-ink">{g.from === g.to ? `Night of ${fmtShort(g.from)}` : `Nights ${fmtShort(g.from)} – ${fmtShort(g.to)}`}{cityFor(g.from) ? ` · ${cityFor(g.from)}` : ''}</div>
+                <div className="text-[12.5px] text-muted">{plural(daysBetween(g.from, g.to) + 1, 'night', 'nights')} without a hotel</div>
+              </div>
+              <button onClick={() => ui.newActivity(trip.id, g.from)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add hotel</button>
+            </div>
+          ))}
+        </Section>
+      )}
+      {unconfirmed.length > 0 && (
+        <Section title="Not confirmed yet" icon="clock">
+          {unconfirmed.map(a => (
+            <button key={a.id} onClick={() => ui.openActivity(a.id)} className={`tone-${toneOf(a.type)} tone-card w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left`}>
+              <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0"><Icon name={TYPE_META[a.type].icon} size={16} /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14.5px] font-semibold text-ink">{a.title}</span>
+                <span className="block text-[12.5px] tone-ink">{fmtShort(a.start.slice(0, 10))} · {a.start.slice(11, 16)}</span>
+              </span>
+              <StatusPill s={a.status as BookingStatus} />
+            </button>
+          ))}
+        </Section>
+      )}
+      {open.length > 0 && (
+        <Section title={`Tasks · ${open.length} open`} icon="check">
+          {open.map(({ a, t }) => (
+            <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card border border-line px-3.5 py-3">
+              <button onClick={() => toggle(a, t.id)} aria-label="Mark as done" className="mt-0.5 h-6 w-6 rounded-lg border-2 border-line hover:border-primary shrink-0" />
+              <div className="min-w-0"><div className="text-[14.5px] text-ink">{t.text}</div><ActRef a={a} /></div>
+            </div>
+          ))}
+          {done.length > 0 && <button onClick={() => setShowDone(s => !s)} className="text-[13px] text-muted hover:text-ink px-1">{showDone ? 'Hide' : 'Show'} {plural(done.length, 'completed task', 'completed tasks')}</button>}
+          {showDone && done.map(({ a, t }) => (
+            <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card/60 border border-line px-3.5 py-3 opacity-70">
+              <button onClick={() => toggle(a, t.id)} aria-label="Mark as open" className="mt-0.5 h-6 w-6 rounded-lg border-2 bg-primary border-primary text-white grid place-items-center shrink-0"><Icon name="check" size={14} stroke={2.5} /></button>
+              <div className="min-w-0"><div className="text-[14.5px] text-muted line-through">{t.text}</div><ActRef a={a} /></div>
+            </div>
+          ))}
+        </Section>
+      )}
+      {warnings.length > 0 && (
+        <Section title="Watch out" icon="note">
+          {warnings.map(({ a, n }) => (
+            <div key={n.id} className="rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
+              <div className="text-[14px] text-ink leading-relaxed">{n.text}</div>
+              <div className="mt-1"><ActRef a={a} /></div>
+            </div>
+          ))}
+        </Section>
       )}
     </div>
   );
@@ -1809,6 +2044,12 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
       }>
         <div className="mt-1.5 text-[14.5px] font-semibold text-cognac">{when}</div>
+        {(a.status || taxiTarget(a)) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <StatusPill s={a.status} always />
+            {taxiTarget(a) && <button onClick={() => ui.taxi(a.id)} className="btn h-9 px-3.5 text-[13px] bg-cognac text-[#1a1009]"><Icon name="car" size={15} />Show to driver</button>}
+          </div>
+        )}
       </SheetHead>
 
       <div className="flex-1 overflow-y-auto px-5 sm:px-7 py-6 space-y-7">
@@ -2072,6 +2313,11 @@ function ActivityForm({ init, onClose }: { init: { tripId: string; activity?: Ac
           </div>
         </div>
 
+        <div>
+          <span className="lbl">Booking status</span>
+          <Segmented value={f.status || 'confirmed'} onChange={v => set({ status: v as BookingStatus })} options={[{ value: 'confirmed', label: 'Confirmed' }, { value: 'pending', label: 'Pending' }, { value: 'planned', label: 'Not booked' }]} />
+        </div>
+
         <Field label={spec.title}><input id="act-title" className="inp" value={f.title} placeholder={spec.titlePh} onChange={e => set({ title: e.target.value })} /></Field>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -2281,6 +2527,7 @@ export function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<any>(null);
   const [viewDocId, setViewDocId] = useState<string | null>(null);
+  const [taxiId, setTaxiId] = useState<string | null>(null);
   const appUpdate = useUpdateCheck();
   const [stagePick, setStagePick] = useState<any>(null);
   const [existingFor, setExistingFor] = useState<Activity | null>(null);
@@ -2293,6 +2540,7 @@ export function App() {
     editTrip: (t: Trip | null) => setTripForm(t),
     openContact: (id: string) => setContactId(id),
     viewDoc: (id: string) => setViewDocId(id),
+    taxi: (id: string) => setTaxiId(id),
     chooseStages: (tripId: string, docIds: string[], initial: string[]) => setStagePick({ tripId, docIds, initial }),
     linkExisting: (a: Activity) => setExistingFor(a),
     editContact: (c: Contact | null) => setContactForm(c),
@@ -2371,6 +2619,7 @@ export function App() {
       {stagePick && <StagePicker {...stagePick} onClose={() => setStagePick(null)} />}
       {existingFor && <ExistingDocPicker activity={existingFor} onClose={() => setExistingFor(null)} />}
       {viewDocId && <DocViewer id={viewDocId} onClose={() => setViewDocId(null)} />}
+      {taxiId && <TaxiCard id={taxiId} onClose={() => setTaxiId(null)} />}
       {actForm && <ActivityForm init={actForm} onClose={() => setActForm(null)} />}
       {tripForm !== undefined && <TripForm trip={tripForm} onClose={() => setTripForm(undefined)} />}
       {contactForm !== undefined && <ContactForm contact={contactForm} onClose={() => setContactForm(undefined)} />}

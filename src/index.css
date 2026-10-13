@@ -101,3 +101,5 @@
 /* Cognac call-to-action (New trip) */
 .btn-cognac { background: linear-gradient(90deg, #B9783F, #D99A60); color: #fff; box-shadow: 0 8px 22px -8px rgb(185 120 63 / .65); }
 .btn-cognac:hover { filter: brightness(1.06); }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
