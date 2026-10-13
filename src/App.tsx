@@ -910,7 +910,8 @@ function ShanghaiArt() {
       {/* Main skyline and its reflection in the Huangpu */}
       <g fill="#121830">{front}</g>
       <rect y="152" width="200" height="48" fill={u('water')} />
-      <g fill="#0d1226" opacity=".7" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{front}</g>`n      <g fill="#ff8fb4" opacity=".22"><ellipse cx="62" cy="189" rx="9" ry="3" /><ellipse cx="62" cy="228" rx="6" ry="2" /></g>
+      <g fill="#0d1226" opacity=".7" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{front}</g>
+      <g fill="#ff8fb4" opacity=".22"><ellipse cx="62" cy="189" rx="9" ry="3" /><ellipse cx="62" cy="228" rx="6" ry="2" /></g>
       <g fill="#ffcf8f">
         {[156, 161, 166, 171, 177, 184, 191].map((y, i) => <rect key={y} x={124 - i * 2} y={y} width={18 + i * 4} height=".9" opacity={0.55 - i * 0.06} />)}
       </g>
@@ -990,8 +991,148 @@ function GuangzhouArt() {
   );
 }
 
+/** Illustrated Dubai at sunset across Burj Lake: the Burj Khalifa with Downtown towers and the fountain. */
+function DubaiArt() {
+  const id = React.useId().replace(/:/g, '');
+  const u = (n: string) => `url(#${id}${n})`;
+  const lights = Array.from({ length: 60 }, (_, i) => {
+    const towers = [[58, 72, 78, 150], [122, 132, 66, 150], [136, 146, 76, 150], [30, 46, 112, 150], [150, 172, 108, 150], [74, 82, 120, 150]];
+    const [x0, x1, y0, y1] = towers[i % towers.length];
+    const r = (k: number) => ((Math.sin(i * 9.17 + k * 63.1) * 31871.27) % 1 + 1) % 1;
+    return { x: x0 + r(1) * (x1 - x0), y: y0 + r(2) * (y1 - y0), o: 0.35 + r(3) * 0.55 };
+  });
+  const city = (
+    <>
+      {/* The Address Downtown: tall slab with a sloped crown */}
+      <polygon points="58,152 58,84 66,74 72,80 72,152" />
+      {/* Emirates Towers: twin triangular tops */}
+      <polygon points="122,152 122,74 127,62 132,74 132,152" />
+      <polygon points="136,152 136,84 141,74 146,84 146,152" />
+      {/* Downtown blocks */}
+      <rect x="30" y="110" width="16" height="42" /><rect x="46" y="122" width="12" height="30" /><rect x="74" y="118" width="8" height="34" />
+      <rect x="112" y="116" width="10" height="36" /><rect x="150" y="106" width="22" height="46" /><rect x="172" y="120" width="28" height="32" /><rect x="0" y="124" width="30" height="28" />
+    </>
+  );
+  // Burj Khalifa: spiralling setbacks, a little different on each side
+  const burj = 'M84 152 V128 H86 V110 H88 V93 H89.6 V77 H91 V63 H92.4 V51 H93.6 V41 H94.6 V31 L95.5 30 L95.8 11 L96.2 11 L96.5 29 L97.4 33 V44 H98.6 V55 H99.8 V68 H101.2 V84 H102.8 V101 H104.6 V119 H106.4 V152 Z';
+  return (
+    <svg viewBox="22 8 156 156" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1a1f4a" /><stop offset=".38" stopColor="#4b3f7a" /><stop offset=".6" stopColor="#c76a5a" /><stop offset=".78" stopColor="#f7b267" />
+        </linearGradient>
+        <radialGradient id={`${id}sun`} cx=".28" cy=".76" r=".45">
+          <stop offset="0" stopColor="#ffe3a6" stopOpacity=".95" /><stop offset=".3" stopColor="#ffbe6e" stopOpacity=".4" /><stop offset="1" stopColor="#ffbe6e" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${id}burj`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#3d4a74" /><stop offset=".45" stopColor="#c9d4ec" /><stop offset=".55" stopColor="#8e9cc4" /><stop offset="1" stopColor="#2b3560" />
+        </linearGradient>
+        <linearGradient id={`${id}water`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6b4a66" /><stop offset=".4" stopColor="#2a2848" /><stop offset="1" stopColor="#0b1020" />
+        </linearGradient>
+        <linearGradient id={`${id}jet`} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0" stopColor="#ffffff" stopOpacity=".85" /><stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+        <clipPath id={`${id}below`}><rect x="0" y="152" width="200" height="48" /></clipPath>
+      </defs>
+      <rect width="200" height="200" fill={u('sky')} />
+      <rect width="200" height="200" fill={u('sun')} />
+      <circle cx="58" cy="140" r="7" fill="#ffd38a" opacity=".85" />
+      {/* Distant skyline in the haze */}
+      <g fill="#4a3c6a" opacity=".8">
+        <rect x="20" y="116" width="10" height="36" /><rect x="48" y="104" width="8" height="48" /><rect x="108" y="100" width="8" height="52" /><rect x="150" y="96" width="9" height="56" /><rect x="164" y="104" width="12" height="48" /><rect x="180" y="110" width="12" height="42" />
+      </g>
+      <g fill="#141832">{city}</g>
+      {/* Burj Khalifa catching the last light */}
+      <path d={burj} fill={u('burj')} />
+      <path d="M95.6 40 V150" stroke="#f3e2c4" strokeWidth=".5" opacity=".6" />
+      <circle cx="96" cy="11" r="1.1" fill="#ff6b6b" />
+      {/* Burj Lake with reflections and the fountain */}
+      <rect y="152" width="200" height="48" fill={u('water')} />
+      <g fill="#10142c" opacity=".65" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{city}</g>
+      <path d={burj} fill={u('burj')} opacity=".25" clipPath={u('below')} transform="translate(0 304) scale(1 -1)" />
+      <g fill="#ffcf8f">{[157, 163, 170, 178, 187].map((y, i) => <rect key={y} x={50 - i * 2} y={y} width={16 + i * 4} height=".8" opacity={0.5 - i * 0.08} />)}</g>
+      <g fill={u('jet')}>
+        {[[70, 18], [76, 24], [82, 16], [110, 20], [116, 26], [122, 17], [128, 22]].map(([x, h]) => <rect key={x} x={x} y={152 - h} width="1.4" height={h} rx=".7" />)}
+      </g>
+      <rect y="151.6" width="200" height=".8" fill="#ffd9a0" opacity=".4" />
+      <g fill="#ffd79a">{lights.map((l, i) => <rect key={i} x={l.x} y={l.y} width="1.1" height="1.4" opacity={l.o} />)}</g>
+    </svg>
+  );
+}
+
+/** Illustrated Singapore at night across Marina Bay: Marina Bay Sands, the ArtScience Museum and the Supertrees. */
+function SingaporeArt() {
+  const id = React.useId().replace(/:/g, '');
+  const u = (n: string) => `url(#${id}${n})`;
+  const lights = Array.from({ length: 72 }, (_, i) => {
+    const towers = [[104, 112, 72, 150], [118, 126, 72, 150], [132, 140, 72, 150], [24, 40, 88, 150], [42, 54, 70, 150], [58, 70, 96, 150]];
+    const [x0, x1, y0, y1] = towers[i % towers.length];
+    const r = (k: number) => ((Math.sin(i * 5.73 + k * 41.9) * 19341.83) % 1 + 1) % 1;
+    return { x: x0 + r(1) * (x1 - x0), y: y0 + r(2) * (y1 - y0), o: 0.4 + r(3) * 0.55 };
+  });
+  const city = (
+    <>
+      {/* Marina Bay Sands: three towers with flared legs under the SkyPark */}
+      <polygon points="101,152 104,70 114,70 114,152" />
+      <polygon points="116,152 118,70 128,70 129,152" />
+      <polygon points="131,152 132,70 142,70 145,152" />
+      <path d="M98 65 H151 C155 65 157 67 157 70 H98 Z" />
+      {/* CBD towers behind the bay */}
+      <rect x="24" y="86" width="16" height="66" /><polygon points="42,152 42,68 48,60 54,68 54,152" /><rect x="58" y="94" width="12" height="58" />
+      <rect x="0" y="108" width="24" height="44" /><rect x="70" y="112" width="10" height="40" />
+      {/* ArtScience Museum: the lotus on the water */}
+      <path d="M80 152 L76 138 L82 146 L83 134 L86 145 L89 132 L91 145 L95 135 L94 147 L99 139 L96 152 Z" />
+    </>
+  );
+  const trees = [[160, 122, 9], [170, 116, 11], [181, 126, 8], [190, 120, 10]];
+  return (
+    <svg viewBox="40 10 156 156" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0c1838" /><stop offset=".45" stopColor="#1f3b6e" /><stop offset=".66" stopColor="#3d6f8f" /><stop offset=".8" stopColor="#d48ba0" />
+        </linearGradient>
+        <linearGradient id={`${id}water`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2f4f72" /><stop offset=".4" stopColor="#152a46" /><stop offset="1" stopColor="#081120" />
+        </linearGradient>
+        <linearGradient id={`${id}tree`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ff7ad9" /><stop offset="1" stopColor="#7a5cff" />
+        </linearGradient>
+        <radialGradient id={`${id}glow`} cx=".5" cy=".5" r=".5">
+          <stop offset="0" stopColor="#ffd7a0" stopOpacity=".45" /><stop offset="1" stopColor="#ffd7a0" stopOpacity="0" />
+        </radialGradient>
+        <clipPath id={`${id}below`}><rect x="0" y="152" width="200" height="48" /></clipPath>
+      </defs>
+      <rect width="200" height="200" fill={u('sky')} />
+      <circle cx="74" cy="36" r="5" fill="#f4ecd6" opacity=".9" />
+      <g fill="#2b4670" opacity=".85">
+        <rect x="16" y="100" width="10" height="52" /><rect x="36" y="78" width="8" height="74" /><rect x="64" y="86" width="8" height="66" /><rect x="88" y="104" width="10" height="48" /><rect x="144" y="108" width="12" height="44" />
+      </g>
+      <ellipse cx="127" cy="80" rx="34" ry="28" fill={u('glow')} />
+      <g fill="#0f1830">{city}</g>
+      {/* SkyPark edge lights */}
+      <rect x="98" y="69.2" width="58" height=".8" fill="#ffd79a" opacity=".85" />
+      {/* Supertrees at Gardens by the Bay */}
+      {trees.map(([x, top, w]) => (
+        <g key={x}>
+          <polygon points={`${x - 1.4},152 ${x + 1.4},152 ${x + 0.7},${top + 6} ${x - 0.7},${top + 6}`} fill="#4a3478" />
+          <path d={`M${x - w / 2} ${top} Q${x} ${top - 2.5} ${x + w / 2} ${top} L${x + 1} ${top + 7} L${x - 1} ${top + 7} Z`} fill={u('tree')} />
+          {[-0.3, 0, 0.3].map(k => <circle key={k} cx={x + k * w} cy={top - 0.2 + Math.abs(k) * 1.2} r=".5" fill="#ffe6ff" />)}
+        </g>
+      ))}
+      {/* Marina Bay with reflections */}
+      <rect y="152" width="200" height="48" fill={u('water')} />
+      <g fill="#0f1830" opacity=".6" clipPath={u('below')} transform="translate(0 304) scale(1 -1)">{city}</g>
+      <g fill="#ffd79a">{[158, 165, 173, 182].map((y, i) => <rect key={y} x={114 - i * 3} y={y} width={26 + i * 6} height=".8" opacity={0.45 - i * 0.08} />)}</g>
+      <g fill="#ff9ae0">{[160, 168].map((y, i) => <rect key={y} x={164 - i * 2} y={y} width={22 + i * 4} height=".7" opacity={0.35 - i * 0.1} />)}</g>
+      <rect y="151.6" width="200" height=".8" fill="#9fd0ff" opacity=".35" />
+      <g fill="#ffe1a8">{lights.map((l, i) => <rect key={i} x={l.x} y={l.y} width="1.1" height="1.4" opacity={l.o} />)}</g>
+    </svg>
+  );
+}
+
 /** Built-in illustrations for destinations, used when a trip has no cover photo. */
-const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt };
+const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt, dubai: DubaiArt, singapore: SingaporeArt };
 
 function DestinationTile({ trip }: { trip: Trip }) {
   const cover = useCoverUrl(trip.id);
