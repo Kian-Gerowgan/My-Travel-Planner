@@ -19,7 +19,7 @@ interface Activity {
   contactIds: string[]; notes: Note[]; tasks: Task[];
   status?: BookingStatus;   // confirmed (default) · pending · planned (not booked yet)
 }
-interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; }
+interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; art?: string /** built-in illustration to show instead of the first city's */; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
 /** A file belonging to a trip. Uploaded once; linked to any number of the trip's stages (none = general). */
 interface Doc { id: string; tripId: string; name: string; mime: string; size: number; activityIds: string[]; addedAt: string; driveId?: string; cover?: boolean; }
@@ -1131,13 +1131,69 @@ function SingaporeArt() {
   );
 }
 
+/** Illustrated Bali at sunset: Tanah Lot sea temple on its rock, framed by palms. */
+function BaliArt() {
+  const id = React.useId().replace(/:/g, '');
+  const u = (n: string) => `url(#${id}${n})`;
+  // Meru tower: stacked thatched roofs, narrowing towards the top
+  const roofs = [24, 20, 16.5, 13, 10, 7].map((w, i) => ({ w, y: 104 - i * 6.2 }));
+  const palm = (x: number, y: number, s: number, lean: number) => (
+    <g>
+      <path d={`M${x} 170 C${x + lean * 0.3} ${150} ${x + lean * 0.8} ${y + 30} ${x + lean} ${y}`} stroke="#140d1c" strokeWidth={2.2 * s} fill="none" strokeLinecap="round" />
+      {[[-16, 6], [-11, -4], [-2, -9], [8, -6], [15, 4], [6, 10], [-8, 11]].map(([dx, dy], i) => (
+        <path key={i} d={`M${x + lean} ${y} Q${x + lean + dx * 0.6 * s} ${y + dy * 0.4 * s - 5 * s} ${x + lean + dx * s} ${y + dy * s + 4 * s}`} stroke="#140d1c" strokeWidth={1.5 * s} fill="none" strokeLinecap="round" />
+      ))}
+    </g>
+  );
+  return (
+    <svg viewBox="22 10 156 156" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2a1f55" /><stop offset=".35" stopColor="#8a3f74" /><stop offset=".58" stopColor="#e2685a" /><stop offset=".72" stopColor="#ffb25e" />
+        </linearGradient>
+        <radialGradient id={`${id}sun`} cx=".68" cy=".66" r=".4">
+          <stop offset="0" stopColor="#ffe9b0" stopOpacity="1" /><stop offset=".25" stopColor="#ffc56e" stopOpacity=".55" /><stop offset="1" stopColor="#ffc56e" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${id}sea`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#c86a5e" /><stop offset=".35" stopColor="#5a2e5a" /><stop offset="1" stopColor="#140f26" />
+        </linearGradient>
+      </defs>
+      <rect width="200" height="200" fill={u('sky')} />
+      <rect width="200" height="200" fill={u('sun')} />
+      <circle cx="136" cy="124" r="9" fill="#ffe3a0" />
+      {/* Distant volcano on the horizon */}
+      <path d="M150 132 L170 112 L174 110 L178 112 L200 128 V132 Z" fill="#7a3a64" opacity=".6" />
+      {/* Sea with the sun's path */}
+      <rect y="132" width="200" height="68" fill={u('sea')} />
+      <g fill="#ffd89a">{[136, 141, 147, 154, 162].map((y, i) => <rect key={y} x={130 - i * 3} y={y} width={12 + i * 6} height=".9" opacity={0.75 - i * 0.12} />)}</g>
+      <g stroke="#ffc9a0" strokeWidth=".6" opacity=".35">{[[40, 150, 22], [64, 158, 18], [150, 156, 20], [30, 164, 16]].map(([x, y, w]) => <line key={x} x1={x} y1={y} x2={x + w} y2={y} />)}</g>
+      {/* Tanah Lot: the rock, its trees and the meru temple */}
+      <g fill="#1a1022">
+        <path d="M64 150 C66 140 70 132 74 124 C77 118 82 114 90 112 L112 111 C118 112 122 116 124 122 C128 130 131 140 134 150 Z" />
+        <circle cx="76" cy="118" r="6" /><circle cx="82" cy="112" r="6.5" /><circle cx="120" cy="114" r="5.5" /><circle cx="114" cy="109" r="4.5" />
+        <rect x="97.4" y="68" width="1.2" height="44" />
+        {roofs.map(({ w, y }) => <path key={y} d={`M${98 - w / 2} ${y} L${98 - w / 2 + 3} ${y - 4.2} H${98 + w / 2 - 3} L${98 + w / 2} ${y} Z`} />)}
+        <rect x="93" y="104" width="10" height="7" />
+        <path d="M97 70 L98 63 L99 70 Z" />
+      </g>
+      <path d="M64 150 C66 140 70 132 74 124" stroke="#ff9b6a" strokeWidth=".6" fill="none" opacity=".4" />
+      {/* Surf around the rock */}
+      <path d="M58 151 C70 148 84 152 98 150 C112 148 126 152 140 150" stroke="#ffe0c0" strokeWidth=".9" fill="none" opacity=".55" />
+      {/* Palms framing the scene */}
+      {palm(30, 54, 1.25, 14)}
+      {palm(48, 82, .9, 6)}
+      {palm(176, 70, 1.05, -10)}
+    </svg>
+  );
+}
+
 /** Built-in illustrations for destinations, used when a trip has no cover photo. */
-const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt, dubai: DubaiArt, singapore: SingaporeArt };
+const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt, dubai: DubaiArt, singapore: SingaporeArt, bali: BaliArt };
 
 function DestinationTile({ trip }: { trip: Trip }) {
   const cover = useCoverUrl(trip.id);
   if (cover) return <img src={cover} alt="" className="h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 rounded-2xl object-cover border border-white/10" />;
-  const Art = CITY_ART[(trip.cities[0] || '').trim().toLowerCase()];
+  const Art = CITY_ART[(trip.art || trip.cities[0] || '').trim().toLowerCase()];
   if (Art) return <div className="relative h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 overflow-hidden rounded-2xl border border-white/10"><Art /></div>;
   const city = trip.cities[0] || trip.countries[0] || trip.name;
   const tint = trip.kind === 'private' ? '217 154 96' : '50 159 255';
