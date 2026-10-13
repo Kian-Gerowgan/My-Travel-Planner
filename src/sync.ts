@@ -54,6 +54,21 @@ function merge(base: SyncData, local: SyncData, remote: SyncData) {
   return { data: { ...strip(remote), trips: t.list, activities: a.list, contacts: c.list, documents: d.list }, conflicts: t.conflicts + a.conflicts + c.conflicts + d.conflicts };
 }
 
+// Ids of the built-in demo data (current and older app versions). They must never reach Drive.
+const SAMPLE_IDS = new Set(['muc', 'cn', 'dxb', 'bali', 'ham', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']);
+
+// First connect of a device that already has local data but no sync history: Drive wins for
+// everything it has; the device only adds its own new items, never demo data.
+function adopt(local: SyncData, remote: SyncData): SyncData {
+  const add = (l: Item[] = [], r: Item[] = [], extra?: (x: any) => boolean) => {
+    const ids = new Set(r.map(x => x.id));
+    return [...r, ...l.filter(x => !ids.has(x.id) && !SAMPLE_IDS.has(x.id) && !(extra && extra(x)))];
+  };
+  const fromSample = (x: any) => SAMPLE_IDS.has(x.tripId);
+  return { ...strip(remote), trips: add(local.trips, remote.trips), activities: add(local.activities, remote.activities, fromSample),
+    contacts: add(local.contacts, remote.contacts), documents: add(local.documents, remote.documents, fromSample) };
+}
+
 export function useDriveSync(data: SyncData, replaceData: (d: SyncData) => void) {
   const meta = useRef<Meta>(loadMeta());
   const dataRef = useRef(data);
@@ -109,7 +124,7 @@ export function useDriveSync(data: SyncData, replaceData: (d: SyncData) => void)
         } else {
           const remote = strip(await drive.downloadJson(m.fileId));
           let merged: SyncData, conflicts = 0;
-          if (!m.base) ({ data: merged, conflicts } = local.sample ? { data: remote, conflicts: 0 } : merge(EMPTY, local, remote));
+          if (!m.base) ({ data: merged, conflicts } = { data: local.sample ? remote : adopt(local, remote), conflicts: 0 });
           else ({ data: merged, conflicts } = merge(m.base, local, remote));
           if (canon(merged) !== canon(remote)) {
             if (conflicts) await backup(m, `travel-data-conflict-${new Date().toISOString().slice(0, 16).replace(':', '-')}.json`);
