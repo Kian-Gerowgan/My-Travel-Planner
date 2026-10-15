@@ -28,8 +28,8 @@ const LOOKS = {
     glow: 1, haze: [255, 205, 165], fog: [196, 170, 172], grade: ['rgba(120,150,210,0.25)', 'rgba(255,170,110,0.25)', 'rgba(30,70,120,0.35)'] },
   gold: { sky: [[0, [150, 120, 140]], [0.28, [214, 150, 120]], [0.55, [246, 170, 96]], [0.75, [255, 182, 92]], [0.9, [255, 200, 120]], [1, [255, 222, 160]]],
     glow: 1.15, haze: [255, 196, 140], fog: [214, 168, 140], grade: ['rgba(200,140,110,0.2)', 'rgba(255,175,90,0.32)', 'rgba(90,70,80,0.3)'], tone: [96, 84, 92] },
-  night: { sky: [[0, [8, 12, 34]], [0.45, [20, 26, 66]], [0.75, [52, 40, 92]], [0.92, [96, 58, 110]], [1, [140, 80, 120]]],
-    glow: 0, night: true, haze: [150, 90, 150], fog: [60, 50, 100], grade: ['rgba(40,60,140,0.3)', 'rgba(140,80,160,0.18)', 'rgba(10,20,60,0.4)'] },
+  night: { sky: [[0, [26, 46, 108]], [0.4, [44, 78, 160]], [0.7, [92, 96, 182]], [0.88, [176, 116, 178]], [1, [236, 150, 170]]],
+    glow: 0, night: true, haze: [200, 130, 180], fog: [110, 100, 170], grade: ['rgba(70,100,190,0.18)', 'rgba(200,120,190,0.15)', 'rgba(30,50,120,0.25)'] },
 };
 let LOOK = LOOKS.golden;
 const skyStops = () => LOOK.sky;
@@ -72,7 +72,7 @@ function paintSky(g, sun) {
 /* ---------- buildings ---------- */
 // depth 0 = nearest, 1 = far (hazier, lighter, bluer)
 function tower(g, path, o) {
-  if (LOOK.night) o = { ...o, light: 0.12, tone: (o.tone || [58, 72, 104]).map(c => c * 0.45) };
+  if (LOOK.night) o = { ...o, light: 0.12, tone: (o.tone || [58, 72, 104]).map(c => c * 0.78) };
   if (LOOK.tone && !o.keepTone) o = { ...o, tone: (o.tone || [58, 72, 104]).map((c, i) => lerp(c, LOOK.tone[i], 0.5)) };
   const { x0, x1, top, depth = 0.3, sun, light = 1, glass = true, floors = 0.55, tone = [58, 72, 104] } = o;
   const bottom = o.bottom ?? H;
@@ -149,7 +149,7 @@ function water(g, scene, sun) {
     g.drawImage(scene, 0, src, S, 1, off, y, S, 1);
   }
   let lg = g.createLinearGradient(0, top, 0, S);
-  if (LOOK.night) { lg.addColorStop(0, 'rgba(20,20,60,0.15)'); lg.addColorStop(0.4, 'rgba(8,12,40,0.45)'); lg.addColorStop(1, 'rgba(4,6,24,0.75)'); }
+  if (LOOK.night) { lg.addColorStop(0, 'rgba(60,70,150,0.1)'); lg.addColorStop(0.4, 'rgba(30,45,110,0.3)'); lg.addColorStop(1, 'rgba(15,25,70,0.55)'); }
   else if (LOOK.tone) { lg.addColorStop(0, 'rgba(150,110,90,0.2)'); lg.addColorStop(0.35, 'rgba(70,60,80,0.4)'); lg.addColorStop(1, 'rgba(30,26,40,0.7)'); }
   else { lg.addColorStop(0, 'rgba(120,140,185,0.25)'); lg.addColorStop(0.35, 'rgba(40,70,120,0.45)'); lg.addColorStop(1, 'rgba(14,30,60,0.75)'); }
   g.fillStyle = lg; g.fillRect(0, top, S, S - top);
@@ -186,7 +186,7 @@ function finish(g, c) {
   let lg = g.createLinearGradient(0, 0, 0, S); lg.addColorStop(0, LOOK.grade[0]); lg.addColorStop(0.65, LOOK.grade[1]); lg.addColorStop(1, LOOK.grade[2]);
   g.fillStyle = lg; g.fillRect(0, 0, S, S); g.restore();
   const vg = g.createRadialGradient(S / 2, S * 0.48, S * 0.35, S / 2, S / 2, S * 0.78);
-  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(10,15,30,0.42)');
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(10,15,30,${LOOK.night ? 0.2 : 0.42})`);
   g.fillStyle = vg; g.fillRect(0, 0, S, S);
   const im = g.getImageData(0, 0, S, S), d = im.data;
   for (let i = 0; i < d.length; i += 4) { const n = (rnd() - 0.5) * 7; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
@@ -331,6 +331,7 @@ window.renderAll = () => {
 };
 </script>
 </body></html>
+
 
 
 
