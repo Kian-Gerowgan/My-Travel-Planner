@@ -1209,10 +1209,15 @@ function BaliArt() {
 /** Built-in illustrations for destinations, used when a trip has no cover photo. */
 const CITY_ART: Record<string, () => JSX.Element> = { shanghai: ShanghaiArt, guangzhou: GuangzhouArt, dubai: DubaiArt, singapore: SingaporeArt, bali: BaliArt };
 
+/** Rendered destination pictures (public/covers, made with tools/cover-renderer.html); preferred over the illustrations. */
+const CITY_PHOTO: Record<string, string> = { shanghai: 'covers/shanghai.jpg', dubai: 'covers/dubai.jpg', bali: 'covers/bali.jpg' };
+
 function DestinationTile({ trip }: { trip: Trip }) {
   const cover = useCoverUrl(trip.id);
-  if (cover) return <img src={cover} alt="" className="h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 rounded-2xl object-cover border border-white/10" />;
-  const Art = CITY_ART[(trip.art || trip.cities[0] || '').trim().toLowerCase()];
+  const key = (trip.art || trip.cities[0] || '').trim().toLowerCase();
+  const photo = cover || (CITY_PHOTO[key] ? import.meta.env.BASE_URL + CITY_PHOTO[key] : '');
+  if (photo) return <img src={photo} alt="" className="h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 rounded-2xl object-cover border border-white/10" />;
+  const Art = CITY_ART[key];
   if (Art) return <div className="relative h-[92px] w-[92px] sm:h-[104px] sm:w-[104px] shrink-0 overflow-hidden rounded-2xl border border-white/10"><Art /></div>;
   const city = trip.cities[0] || trip.countries[0] || trip.name;
   const tint = trip.kind === 'private' ? '217 154 96' : '50 159 255';
