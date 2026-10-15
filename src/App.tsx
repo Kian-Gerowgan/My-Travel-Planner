@@ -9,7 +9,9 @@ import { useUpdateCheck } from './updates';
    ========================================================================= */
 type ActivityType = 'flight' | 'train' | 'hotel' | 'meeting' | 'transfer' | 'personal';
 interface Note { id: string; text: string; createdAt: string; }
-interface Task { id: string; text: string; done: boolean; }
+interface Task { id: string; text: string; done: boolean; due?: string /** YYYY-MM-DD */; }
+/** Price of a booking; `paidAmount` < `amount` means something is still to be paid (by `due`). */
+interface Cost { amount: number; currency: string; paidAmount: number; due?: string; }
 interface Activity {
   id: string; tripId: string; type: ActivityType; title: string;
   start: string; startTz: string;          // local wall time "YYYY-MM-DDTHH:mm" + IANA zone
@@ -18,12 +20,14 @@ interface Activity {
   details: Record<string, string>;
   contactIds: string[]; notes: Note[]; tasks: Task[];
   status?: BookingStatus;   // confirmed (default) · pending · planned (not booked yet)
+  travellers?: string[];    // subset of the trip's travellers; absent = everyone
+  cost?: Cost;
 }
-interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; art?: string /** built-in illustration to show instead of the first city's */; }
+interface Trip { id: string; name: string; kind: 'business' | 'private'; countries: string[]; cities: string[]; start: string; end: string; archived: boolean; art?: string /** built-in illustration to show instead of the first city's */; travellers?: string[]; }
 interface Contact { id: string; name: string; company: string; position: string; phone: string; email: string; country: string; city: string; notes: string; }
 /** A file belonging to a trip. Uploaded once; linked to any number of the trip's stages (none = general). */
 interface Doc { id: string; tripId: string; name: string; mime: string; size: number; activityIds: string[]; addedAt: string; driveId?: string; cover?: boolean; }
-interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; documents: Doc[]; sample?: boolean; }
+interface Data { version: number; trips: Trip[]; activities: Activity[]; contacts: Contact[]; documents: Doc[]; sample?: boolean; deleted?: Record<string, string>; }
 interface Entry { key: string; a: Activity; kind: 'main' | 'arrival' | 'checkout'; date: string; time: string; endTime?: string; ms: number; endMs?: number; }
 
 /* =========================================================================
@@ -336,6 +340,9 @@ const ICONS: Record<string, string> = {
   image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
 };
 function Icon({ name, size = 18, className = '', stroke = 1.75 }: { name: string; size?: number; className?: string; stroke?: number }) {
@@ -359,7 +366,18 @@ export function StoreProvider({ children }: { children: any }) {
   const api = useMemo(() => {
     const upsert = (list: any[], item: any) => list.some(x => x.id === item.id) ? list.map(x => x.id === item.id ? item : x) : [...list, item];
     // Any edit turns the sample trips into the user's own data.
-    const edit = (f: (d: Data) => Data) => setData(d => { const n = f(d); return n === d ? d : { ...n, sample: false }; });
+    // Removed items are remembered with the date, so sync can't resurrect them from an older device.
+    const edit = (f: (d: Data) => Data) => setData(d => {
+      const n = f(d);
+      if (n === d) return d;
+      const deleted = { ...(n.deleted || {}) };
+      const day = todayStr();
+      (['trips', 'activities', 'contacts', 'documents'] as const).forEach(k => {
+        const now = new Set((n[k] as { id: string }[]).map(x => x.id));
+        (d[k] as { id: string }[]).forEach(x => { if (!now.has(x.id)) deleted[x.id] = day; });
+      });
+      return { ...n, sample: false, deleted };
+    });
     return {
       saveTrip: (t: Trip) => edit(d => ({ ...d, trips: upsert(d.trips, t) })),
       duplicateTrip: (id: string) => edit(d => {
@@ -590,6 +608,7 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
         <span className="flex items-center gap-2">
           <span className="tone-ink text-[14px] font-semibold tabular-nums">{v.time}</span>
           {e.kind === 'main' && <StatusPill s={a.status} />}
+          <TravellerDots a={a} trip={data.trips.find((t: Trip) => t.id === a.tripId)} />
           {(docCount > 0 || (a.notes.length > 0 && e.kind === 'main')) && (
             <span className="flex items-center gap-2 text-[11.5px] text-ink/55">
               {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
@@ -1373,14 +1392,17 @@ function TripsPage() {
 function TripPage({ id, tab }: { id: string; tab: string }) {
   const { data, duplicateTrip, setArchived, deleteTrip } = useStore();
   const ui = useUI();
-  const acts = useMemo(() => data.activities.filter((a: Activity) => a.tripId === id), [data.activities, id]);
-  const entries = useMemo(() => buildEntries(acts), [acts]);
   const trip: Trip | undefined = data.trips.find((t: Trip) => t.id === id);
+  const [who, setWho] = useState('');
+  const allActs = useMemo(() => data.activities.filter((a: Activity) => a.tripId === id), [data.activities, id]);
+  const acts = useMemo(() => allActs.filter((a: Activity) => goesWith(a, who)), [allActs, who]);
+  const entries = useMemo(() => buildEntries(acts), [acts]);
   if (!trip) return <Empty icon="globe" title="Trip not found" text="This trip no longer exists." action={<button className="btn btn-primary" onClick={() => go('#/trips')}>Back to all trips</button>} />;
   const status = tripStatus(trip);
   const days = daysBetween(trip.start, trip.end) + 1;
   const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id && !d.cover).length;
-  const todoCount = tripTodos(trip, acts).count;
+  const todoCount = tripTodos(trip, allActs).count;
+  const filterable = tab === 'timeline' || tab === 'today' || tab === 'calendar';
   const td = todayStr();
 
   return (
@@ -1420,15 +1442,18 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
           { value: 'calendar', label: 'Calendar', icon: 'calendar' },
           { value: 'documents', label: `Docs${docCount ? ` ${docCount}` : ''}`, icon: 'file' },
           { value: 'todos', label: `To-dos${todoCount ? ` ${todoCount}` : ''}`, icon: 'check' },
+          { value: 'costs', label: 'Costs', icon: 'wallet' },
         ]} /></div>
         <button onClick={() => ui.newActivity(trip.id)} className="hidden md:inline-flex btn btn-primary h-10"><Icon name="plus" />Activity</button>
       </div>
 
+      {filterable && <TravellerFilter trip={trip} who={who} onChange={setWho} />}
       {tab === 'timeline' && <div className="max-w-3xl"><Timeline trip={trip} acts={acts} entries={entries} /></div>}
       {tab === 'calendar' && <CalendarView entries={entries} initialDate={td >= trip.start && td <= trip.end ? td : trip.start} ranges={[trip]} />}
-      {tab === 'documents' && <TripDocuments trip={trip} acts={acts} entries={entries} />}
+      {tab === 'documents' && <TripDocuments trip={trip} acts={allActs} entries={buildEntries(allActs)} />}
       {tab === 'today' && <TripToday key={trip.id} trip={trip} acts={acts} entries={entries} />}
-      {tab === 'todos' && <TripTodos trip={trip} acts={acts} entries={entries} />}
+      {tab === 'todos' && <TripTodos trip={trip} acts={allActs} entries={buildEntries(allActs)} />}
+      {tab === 'costs' && <TripCosts trip={trip} acts={allActs} />}
 
       {(tab === 'timeline' || tab === 'calendar') && (
         <button onClick={() => ui.newActivity(trip.id)} aria-label="Add activity" className="md:hidden fixed right-5 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-30 h-14 w-14 rounded-full bg-primary text-white grid place-items-center shadow-lift active:scale-95 transition"><Icon name="plus" size={24} stroke={2} /></button>
@@ -1524,6 +1549,7 @@ function TripToday({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
   const idx = daysBetween(trip.start, day) + 1;
   const total = daysBetween(trip.start, trip.end) + 1;
   const hotelTaxi = hotel ? taxiTarget(hotel) : null;
+  const dueToday = tripTodos(trip, acts).deadlines.filter(d => d.date === day || (day === td && d.date < td));
   return (
     <div className="max-w-3xl">
       <div className="flex items-center gap-3 mb-5">
@@ -1536,6 +1562,19 @@ function TripToday({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
         <button onClick={() => setDay(addDays(day, 1))} disabled={day >= trip.end} aria-label="Next day" className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-card border border-line text-heading disabled:opacity-30"><Icon name="right" /></button>
       </div>
       {!inTrip && td < trip.start && <p className="mb-4 text-center text-[13px] text-muted">Your trip starts in {plural(daysBetween(td, trip.start), 'day', 'days')}. During the trip, this page opens on the current day.</p>}
+      {dueToday.length > 0 && (
+        <section className="mb-5 rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
+          <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac mb-2 flex items-center gap-2"><Icon name="flag" size={14} />Deadlines</h3>
+          <div className="space-y-1.5">
+            {dueToday.map(d => (
+              <button key={d.key} onClick={() => ui.openActivity(d.a.id)} className="w-full flex items-start gap-2 text-left">
+                <Icon name={d.kind === 'payment' ? 'wallet' : 'check'} size={15} className="text-cognac mt-0.5" />
+                <span className="min-w-0 flex-1 text-[14px] text-ink">{d.text}<span className="block text-[12px] text-muted">{d.date < day ? `Overdue since ${fmtShort(d.date)} · ` : ''}{d.a.title}</span></span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {list.length ? list.map((e, j) => <EntryRow key={e.key} e={e} next={next} last={j === list.length - 1} />)
         : <Empty icon="calendar" title="Nothing planned" text="No stages on this day." action={<button className="btn btn-primary" onClick={() => ui.newActivity(trip.id, day)}><Icon name="plus" />Add activity</button>} />}
@@ -1559,29 +1598,136 @@ function TripToday({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
   );
 }
 
-/** Everything still open for a trip: missing nights, unconfirmed bookings, tasks and warnings. */
+/* ---------- Travellers, money and due dates ---------- */
+/** True when the stage includes this traveller (no traveller chosen = everyone). */
+const goesWith = (a: Activity, who: string) => !who || !a.travellers?.length || a.travellers.includes(who);
+const sharesTraveller = (a: Activity, b: Activity) => !a.travellers?.length || !b.travellers?.length || a.travellers.some(x => b.travellers!.includes(x));
+const isTransport = (a: Activity) => a.type === 'flight' || a.type === 'train' || a.type === 'transfer';
+
+function fmtMoney(amount: number, currency: string) {
+  try { return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: currency || 'EUR', currencyDisplay: 'narrowSymbol' }).format(amount); }
+  catch { return `${currency} ${amount.toFixed(2)}`; }
+}
+const openAmount = (c?: Cost) => (c ? Math.max(0, c.amount - (c.paidAmount || 0)) : 0);
+
+/** Short human label for a due date relative to today. */
+function dueLabel(due: string) {
+  const n = daysBetween(todayStr(), due);
+  if (n < 0) return `Overdue · ${fmtShort(due)}`;
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Tomorrow';
+  if (n < 7) return `${fmtShort(due)} · in ${n} days`;
+  return fmtShort(due);
+}
+const dueTone = (due?: string) => {
+  if (!due) return 'text-muted border-line border-dashed';
+  const n = daysBetween(todayStr(), due);
+  return n < 0 ? 'text-danger border-danger/50 bg-danger/10' : n <= 7 ? 'text-cognac border-cognac/50 bg-cognac/10' : 'text-petrol border-line';
+};
+
+/** Date pill that opens the native date picker; used to give a task a deadline. */
+function DueChip({ due, onChange }: { due?: string; onChange: (d?: string) => void }) {
+  return (
+    <label className={`relative inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[11.5px] font-semibold whitespace-nowrap cursor-pointer ${dueTone(due)}`} onClick={e => e.stopPropagation()}>
+      <Icon name="calendar" size={12} />{due ? dueLabel(due) : 'Add date'}
+      <input type="date" value={due || ''} onChange={e => onChange(e.target.value || undefined)} aria-label="Due date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+    </label>
+  );
+}
+
+/** Small initials for the people on a stage, shown only when not everyone travels. */
+function TravellerDots({ a, trip }: { a: Activity; trip?: Trip }) {
+  if (!trip?.travellers || trip.travellers.length < 2 || !a.travellers?.length || a.travellers.length >= trip.travellers.length) return null;
+  return (
+    <span className="flex -space-x-1" title={a.travellers.join(', ')}>
+      {a.travellers.map(n => <span key={n} className="h-[18px] min-w-[18px] px-1 rounded-full bg-ink/15 border border-white/10 text-ink/90 text-[9.5px] font-bold grid place-items-center">{n.slice(0, 2)}</span>)}
+    </span>
+  );
+}
+
+/** Filter chips above a family trip: everyone or one person's view. */
+function TravellerFilter({ trip, who, onChange }: { trip: Trip; who: string; onChange: (w: string) => void }) {
+  if (!trip.travellers || trip.travellers.length < 2) return null;
+  const opts = ['', ...trip.travellers];
+  return (
+    <div className="mb-5 flex gap-2 overflow-x-auto no-scrollbar">
+      {opts.map(o => (
+        <button key={o || 'all'} onClick={() => onChange(o)} aria-pressed={who === o}
+          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold border transition ${who === o ? 'bg-petrol-fill text-white border-transparent' : 'bg-card border-line text-muted hover:text-ink'}`}>
+          {o ? o : <span className="inline-flex items-center gap-1.5"><Icon name="users" size={14} />Everyone</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Trip check ---------- */
+type Deadline = { key: string; date: string; a: Activity; kind: 'task' | 'payment'; text: string; t?: Task };
+type Issue = { key: string; icon: string; title: string; text: string; a?: Activity; date?: string };
+
+/** Everything still open for a trip: deadlines, missing nights, schedule problems, unconfirmed bookings, tasks and warnings. */
 function tripTodos(trip: Trip, acts: Activity[]) {
-  const sorted = [...acts].sort((a, b) => toUtc(a.start, a.startTz) - toUtc(b.start, b.startTz));
+  const ms = (a: Activity) => toUtc(a.start, a.startTz);
+  const endMs = (a: Activity) => (a.end ? toUtc(a.end, a.endTz || a.startTz) : ms(a));
+  const sorted = [...acts].sort((a, b) => ms(a) - ms(b));
+
+  // Nights without a hotel (sleeping on a plane or train counts as covered) – checked for each traveller
+  const people = trip.travellers && trip.travellers.length > 1 ? trip.travellers : [''];
+  const covered = (d: string, who: string) => {
+    const mine = acts.filter(a => goesWith(a, who));
+    // Before this person's first stage or after their last one they are at home.
+    if (who && mine.length && (d < mine.reduce((m, a) => a.start < m ? a.start : m, '9').slice(0, 10) || d >= mine.reduce((m, a) => (a.end || a.start) > m ? (a.end || a.start) : m, '').slice(0, 10))) return true;
+    return !!hotelFor(mine, d) || mine.some(a => (a.type === 'flight' || a.type === 'train') && a.end && a.start.slice(0, 10) <= d && a.end.slice(0, 10) > d);
+  };
   const gapDays: string[] = [];
-  for (let d = trip.start; d < trip.end; d = addDays(d, 1)) {
-    if (hotelFor(acts, d)) continue;
-    const onBoard = acts.some(a => (a.type === 'flight' || a.type === 'train') && a.end && a.start.slice(0, 10) <= d && a.end.slice(0, 10) > d);
-    if (!onBoard) gapDays.push(d);
-  }
+  for (let d = trip.start; d < trip.end; d = addDays(d, 1)) if (people.some(p => !covered(d, p))) gapDays.push(d);
   const gaps: { from: string; to: string }[] = [];
   gapDays.forEach(d => { const last = gaps[gaps.length - 1]; if (last && addDays(last.to, 1) === d) last.to = d; else gaps.push({ from: d, to: d }); });
+
+  // Schedule: journey there and back, overlaps, tight connections
+  const issues: Issue[] = [];
+  if (acts.length) {
+    const travelOn = (d: string) => acts.some(a => isTransport(a) && (a.start.slice(0, 10) === d || a.end?.slice(0, 10) === d));
+    if (!travelOn(trip.start)) issues.push({ key: 'out', icon: 'plane', title: 'No outbound journey', text: `Nothing booked to get there on ${fmtShort(trip.start)}.`, date: trip.start });
+    if (!travelOn(trip.end)) issues.push({ key: 'back', icon: 'plane', title: 'No journey home', text: `Nothing booked for the way back on ${fmtShort(trip.end)}.`, date: trip.end });
+  }
+  const timed = sorted.filter(a => a.type !== 'hotel' && a.status !== 'planned');
+  timed.forEach((a, i) => {
+    for (const b of timed.slice(i + 1)) {
+      if (ms(b) >= endMs(a)) break;
+      if (!sharesTraveller(a, b) || endMs(a) === ms(a)) continue;
+      issues.push({ key: `ov${a.id}${b.id}`, icon: 'alert', title: 'Overlap', text: `“${a.title}” runs until ${(a.end || '').slice(11, 16)}, but “${b.title}” starts at ${b.start.slice(11, 16)}.`, a: b, date: b.start.slice(0, 10) });
+    }
+  });
+  const rides = sorted.filter(a => (a.type === 'flight' || a.type === 'train') && a.end && a.status !== 'planned');
+  rides.forEach((a, i) => {
+    const b = rides.slice(i + 1).find(x => sharesTraveller(a, x));
+    if (!b) return;
+    const gap = (ms(b) - endMs(a)) / 60000;
+    const need = b.type === 'flight' ? 90 : 30;
+    if (gap >= 0 && gap < need) issues.push({ key: `cx${a.id}`, icon: 'clock', title: 'Tight connection', text: `Only ${Math.round(gap)} min between arriving with ${a.details.flightNo || a.details.trainNo || a.title} and departing with ${b.details.flightNo || b.details.trainNo || b.title}.`, a: b, date: b.start.slice(0, 10) });
+  });
+
+  // Deadlines: dated tasks and outstanding payments
+  const deadlines: Deadline[] = [];
+  sorted.forEach(a => {
+    a.tasks.forEach(t => { if (t.due && !t.done) deadlines.push({ key: t.id, date: t.due, a, kind: 'task', text: t.text, t }); });
+    if (a.cost && openAmount(a.cost) > 0 && a.cost.due) deadlines.push({ key: a.id + ':pay', date: a.cost.due, a, kind: 'payment', text: `${fmtMoney(openAmount(a.cost), a.cost.currency)} to be paid` });
+  });
+  deadlines.sort((x, y) => x.date.localeCompare(y.date));
+
   const unconfirmed = sorted.filter(a => a.status === 'planned' || a.status === 'pending');
-  const tasks = sorted.flatMap(a => a.tasks.map(t => ({ a, t })));
+  const tasks = sorted.flatMap(a => a.tasks.filter(t => !t.due || t.done).map(t => ({ a, t })));
   const warnings = sorted.flatMap(a => a.notes.filter(n => n.text.trim().startsWith('⚠')).map(n => ({ a, n })));
-  const count = gaps.length + unconfirmed.length + tasks.filter(x => !x.t.done).length;
-  return { gaps, unconfirmed, tasks, warnings, count };
+  const count = deadlines.length + gaps.length + issues.length + unconfirmed.length + tasks.filter(x => !x.t.done).length;
+  return { deadlines, gaps, issues, unconfirmed, tasks, warnings, count };
 }
 
 function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
   const { updateActivity } = useStore();
   const ui = useUI();
   const [showDone, setShowDone] = useState(false);
-  const { gaps, unconfirmed, tasks, warnings } = tripTodos(trip, acts);
+  const { deadlines, gaps, issues, unconfirmed, tasks, warnings } = tripTodos(trip, acts);
   const open = tasks.filter(x => !x.t.done), done = tasks.filter(x => x.t.done);
   // Where you are that night: the destination of the last flight/train that arrived by then, else the day's last city.
   const cityFor = (d: string) => {
@@ -1594,18 +1740,51 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
       <Icon name={TYPE_META[a.type].icon} size={12} />{fmtShort(a.start.slice(0, 10))} · {a.title}
     </button>
   );
-  const toggle = (a: Activity, tid: string) => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(t => t.id === tid ? { ...t, done: !t.done } : t) }));
+  const patchTask = (a: Activity, tid: string, p: Partial<Task>) => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(t => t.id === tid ? { ...t, ...p } : t) }));
+  const toggle = (a: Activity, t: Task) => patchTask(a, t.id, { done: !t.done });
+  const markPaid = (a: Activity) => { updateActivity(a.id, (x: Activity) => ({ ...x, cost: x.cost ? { ...x.cost, paidAmount: x.cost.amount } : x.cost })); ui.toast('Marked as paid'); };
   const Section = ({ title, icon, children }: any) => (
     <section>
       <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-3 flex items-center gap-2"><Icon name={icon} size={15} />{title}</h3>
       <div className="space-y-2">{children}</div>
     </section>
   );
-  if (!gaps.length && !unconfirmed.length && !open.length && !warnings.length) {
-    return <div className="max-w-3xl"><Empty icon="check" title="All set" text="No missing hotels, no unconfirmed bookings and no open tasks for this trip." /></div>;
+  const Check = ({ onClick, on }: { onClick: () => void; on?: boolean }) => (
+    <button onClick={onClick} aria-label={on ? 'Mark as open' : 'Mark as done'} className={`mt-0.5 h-6 w-6 rounded-lg border-2 grid place-items-center shrink-0 ${on ? 'bg-primary border-primary text-white' : 'border-line hover:border-primary'}`}>{on && <Icon name="check" size={14} stroke={2.5} />}</button>
+  );
+  const problems = gaps.length + issues.length + unconfirmed.length;
+  if (!deadlines.length && !problems && !open.length && !warnings.length) {
+    return <div className="max-w-3xl"><Empty icon="check" title="All set" text="No deadlines, no missing hotels, no schedule problems and no open tasks for this trip." /></div>;
   }
   return (
     <div className="max-w-3xl space-y-8">
+      <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${problems ? 'border-cognac/40 bg-cognac/10' : 'border-dot/40 bg-dot/10'}`}>
+        <Icon name={problems ? 'alert' : 'check'} size={20} className={problems ? 'text-cognac' : 'text-dot'} />
+        <div className="text-[14px] text-ink">
+          <span className="font-semibold">Trip check:</span>{' '}
+          {problems ? [gaps.length && plural(gaps.length, 'gap in accommodation', 'gaps in accommodation'), issues.length && plural(issues.length, 'schedule issue', 'schedule issues'), unconfirmed.length && `${unconfirmed.length} not confirmed`].filter(Boolean).join(' · ') : 'no gaps or conflicts found'}
+          {deadlines.length > 0 && <span className="text-muted"> · {plural(deadlines.length, 'deadline', 'deadlines')}</span>}
+        </div>
+      </div>
+
+      {deadlines.length > 0 && (
+        <Section title="Deadlines" icon="flag">
+          {deadlines.map(d => (
+            <div key={d.key} className={`flex items-start gap-3 rounded-2xl border px-3.5 py-3 ${daysBetween(todayStr(), d.date) < 0 ? 'border-danger/40 bg-danger/10' : 'bg-card border-line'}`}>
+              {d.kind === 'task' ? <Check onClick={() => toggle(d.a, d.t!)} /> : <span className="mt-0.5 h-6 w-6 grid place-items-center text-cognac shrink-0"><Icon name="wallet" size={18} /></span>}
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] text-ink">{d.text}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {d.kind === 'task' ? <DueChip due={d.date} onChange={v => patchTask(d.a, d.t!.id, { due: v })} /> : <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[11.5px] font-semibold ${dueTone(d.date)}`}><Icon name="calendar" size={12} />{dueLabel(d.date)}</span>}
+                  <ActRef a={d.a} />
+                </div>
+              </div>
+              {d.kind === 'payment' && <button onClick={() => markPaid(d.a)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Paid</button>}
+            </div>
+          ))}
+        </Section>
+      )}
+
       {gaps.length > 0 && (
         <Section title="No accommodation" icon="bed">
           {gaps.map(g => (
@@ -1620,6 +1799,23 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
           ))}
         </Section>
       )}
+
+      {issues.length > 0 && (
+        <Section title="Schedule" icon="alert">
+          {issues.map(i => (
+            <div key={i.key} className="flex items-start gap-3 rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
+              <Icon name={i.icon} size={18} className="text-cognac shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] font-semibold text-ink">{i.title}</div>
+                <div className="text-[13px] text-ink/80 leading-snug">{i.text}</div>
+                {i.a && <div className="mt-1"><ActRef a={i.a} /></div>}
+              </div>
+              {!i.a && i.date && <button onClick={() => ui.newActivity(trip.id, i.date)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add</button>}
+            </div>
+          ))}
+        </Section>
+      )}
+
       {unconfirmed.length > 0 && (
         <Section title="Not confirmed yet" icon="clock">
           {unconfirmed.map(a => (
@@ -1634,23 +1830,28 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
           ))}
         </Section>
       )}
-      {open.length > 0 && (
+
+      {(open.length > 0 || done.length > 0) && (
         <Section title={`Tasks · ${open.length} open`} icon="check">
           {open.map(({ a, t }) => (
             <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card border border-line px-3.5 py-3">
-              <button onClick={() => toggle(a, t.id)} aria-label="Mark as done" className="mt-0.5 h-6 w-6 rounded-lg border-2 border-line hover:border-primary shrink-0" />
-              <div className="min-w-0"><div className="text-[14.5px] text-ink">{t.text}</div><ActRef a={a} /></div>
+              <Check onClick={() => toggle(a, t)} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14.5px] text-ink">{t.text}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><DueChip due={t.due} onChange={v => patchTask(a, t.id, { due: v })} /><ActRef a={a} /></div>
+              </div>
             </div>
           ))}
           {done.length > 0 && <button onClick={() => setShowDone(s => !s)} className="text-[13px] text-muted hover:text-ink px-1">{showDone ? 'Hide' : 'Show'} {plural(done.length, 'completed task', 'completed tasks')}</button>}
           {showDone && done.map(({ a, t }) => (
             <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card/60 border border-line px-3.5 py-3 opacity-70">
-              <button onClick={() => toggle(a, t.id)} aria-label="Mark as open" className="mt-0.5 h-6 w-6 rounded-lg border-2 bg-primary border-primary text-white grid place-items-center shrink-0"><Icon name="check" size={14} stroke={2.5} /></button>
+              <Check onClick={() => toggle(a, t)} on />
               <div className="min-w-0"><div className="text-[14.5px] text-muted line-through">{t.text}</div><ActRef a={a} /></div>
             </div>
           ))}
         </Section>
       )}
+
       {warnings.length > 0 && (
         <Section title="Watch out" icon="note">
           {warnings.map(({ a, n }) => (
@@ -1661,6 +1862,86 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
           ))}
         </Section>
       )}
+    </div>
+  );
+}
+
+/* ---------- Costs ---------- */
+const COST_GROUPS: { title: string; icon: string; types: ActivityType[] }[] = [
+  { title: 'Transport', icon: 'plane', types: ['flight', 'train', 'transfer'] },
+  { title: 'Accommodation', icon: 'bed', types: ['hotel'] },
+  { title: 'Other', icon: 'wallet', types: ['meeting', 'personal'] },
+];
+
+/** What the trip costs: totals per currency, every priced booking, and bookings still without a price. */
+function TripCosts({ trip, acts }: { trip: Trip; acts: Activity[] }) {
+  const ui = useUI();
+  const priced = acts.filter(a => a.cost && a.cost.amount > 0).sort((a, b) => toUtc(a.start, a.startTz) - toUtc(b.start, b.startTz));
+  const missing = acts.filter(a => !a.cost && a.status !== 'planned' && (isTransport(a) || a.type === 'hotel')).sort((a, b) => a.start.localeCompare(b.start));
+  const totals: Record<string, { total: number; paid: number }> = {};
+  priced.forEach(a => { const c = a.cost!; const t = (totals[c.currency] = totals[c.currency] || { total: 0, paid: 0 }); t.total += c.amount; t.paid += Math.min(c.amount, c.paidAmount || 0); });
+  const currencies = Object.keys(totals).sort((x, y) => totals[y].total - totals[x].total);
+
+  if (!priced.length) return (
+    <div className="max-w-3xl"><Empty icon="wallet" title="No prices yet" text="Add the price to a booking under Edit → Price. Totals per currency appear here." action={missing[0] ? <button className="btn btn-primary" onClick={() => ui.editActivity(missing[0])}><Icon name="plus" />Add a price</button> : undefined} /></div>
+  );
+  return (
+    <div className="max-w-3xl space-y-8">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {currencies.map(cur => {
+          const t = totals[cur], open = t.total - t.paid;
+          return (
+            <div key={cur} className="rounded-2xl bg-card border border-line p-4">
+              <div className="text-[11.5px] font-bold uppercase tracking-[0.14em] text-muted">Total · {cur}</div>
+              <div className="font-display text-[30px] leading-tight text-heading tabular-nums mt-1">{fmtMoney(t.total, cur)}</div>
+              <div className="mt-1.5 flex flex-wrap gap-x-4 text-[13px] tabular-nums">
+                <span className="text-dot">Paid {fmtMoney(t.paid, cur)}</span>
+                {open > 0.004 && <span className="text-cognac">Open {fmtMoney(open, cur)}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {COST_GROUPS.map(g => {
+        const list = priced.filter(a => g.types.includes(a.type));
+        if (!list.length) return null;
+        return (
+          <section key={g.title}>
+            <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-3 flex items-center gap-2"><Icon name={g.icon} size={15} />{g.title}</h3>
+            <div className="rounded-2xl bg-card border border-line divide-y divide-line">
+              {list.map(a => {
+                const c = a.cost!, open = openAmount(c);
+                return (
+                  <button key={a.id} onClick={() => ui.openActivity(a.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03]">
+                    <span className={`tone-${toneOf(a.type)} tone-ink shrink-0`}><Icon name={TYPE_META[a.type].icon} size={16} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14.5px] text-ink truncate">{a.title}</span>
+                      <span className="block text-[12.5px] text-muted">{fmtShort(a.start.slice(0, 10))}{open > 0 ? ` · ${fmtMoney(open, c.currency)} open${c.due ? ` – due ${fmtShort(c.due)}` : ''}` : ' · paid'}</span>
+                    </span>
+                    <span className={`text-[15px] font-semibold tabular-nums shrink-0 ${open > 0 ? 'text-cognac' : 'text-ink'}`}>{fmtMoney(c.amount, c.currency)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+
+      {missing.length > 0 && (
+        <section>
+          <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-3 flex items-center gap-2"><Icon name="note" size={15} />Price not entered yet</h3>
+          <div className="space-y-2">
+            {missing.map(a => (
+              <div key={a.id} className="flex items-center gap-3 rounded-2xl border border-dashed border-line px-4 py-2.5">
+                <span className="min-w-0 flex-1 text-[14px] text-muted truncate">{fmtShort(a.start.slice(0, 10))} · {a.title}</span>
+                <button onClick={() => ui.editActivity(a)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add price</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      <p className="text-[12.5px] text-muted">Totals are kept per currency – no exchange rates are applied.</p>
     </div>
   );
 }
@@ -2228,6 +2509,11 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
     if (d[fd.key]) facts.push([fd.label, d[fd.key], fd.type]);
   });
   if (!isRoute) facts.push(['Time zone', `${tzCity(a.startTz)} (${gmtLabel(a.startTz, a.start)})`]);
+  if (trip?.travellers && trip.travellers.length > 1) facts.push(['Travellers', a.travellers?.length ? a.travellers.join(', ') : 'Everyone']);
+  if (a.cost && a.cost.amount > 0) {
+    const open = openAmount(a.cost);
+    facts.push(['Price', `${fmtMoney(a.cost.amount, a.cost.currency)} · ${open <= 0 ? 'paid' : a.cost.paidAmount > 0 ? `${fmtMoney(open, a.cost.currency)} still open` : 'not paid yet'}${open > 0 && a.cost.due ? ` – due ${fmtShort(a.cost.due)}` : ''}`]);
+  }
 
   const toggleTask = (tid: string) => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(t => t.id === tid ? { ...t, done: !t.done } : t) }));
   const addTask = () => { if (!taskDraft.trim()) return; updateActivity(a.id, (x: Activity) => ({ ...x, tasks: [...x.tasks, { id: uid(), text: taskDraft.trim(), done: false }] })); setTaskDraft(''); };
@@ -2310,14 +2596,17 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </section>
         )}
 
-        {a.type === 'meeting' && (
+        {(
           <section>
-            <SectionTitle icon="check">Follow-up tasks</SectionTitle>
+            <SectionTitle icon="check">{a.type === 'meeting' ? 'Follow-up tasks' : 'Tasks'}</SectionTitle>
             <div className="space-y-1.5">
               {a.tasks.map(t => (
-                <div key={t.id} className="group flex items-center gap-3 rounded-xl px-1 py-1.5">
+                <div key={t.id} className="group flex items-start gap-3 rounded-xl px-1 py-1.5">
                   <button onClick={() => toggleTask(t.id)} aria-label={t.done ? 'Mark as open' : 'Mark as done'} className={`h-6 w-6 rounded-lg border-2 grid place-items-center shrink-0 transition ${t.done ? 'bg-primary border-primary text-white' : 'border-line hover:border-primary'}`}>{t.done && <Icon name="check" size={14} stroke={2.5} />}</button>
-                  <span className={`flex-1 text-[15px] ${t.done ? 'line-through text-muted' : 'text-ink'}`}>{t.text}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-[15px] ${t.done ? 'line-through text-muted' : 'text-ink'}`}>{t.text}</span>
+                    {!t.done && <span className="mt-1 block"><DueChip due={t.due} onChange={v => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(y => y.id === t.id ? { ...y, due: v } : y) }))} /></span>}
+                  </span>
                   <button onClick={() => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.filter(y => y.id !== t.id) }))} aria-label="Delete task" className="opacity-60 sm:opacity-0 group-hover:opacity-100 h-8 w-8 grid place-items-center rounded-full text-muted hover:text-danger"><Icon name="x" size={15} /></button>
                 </div>
               ))}
@@ -2515,6 +2804,24 @@ function ActivityForm({ init, onClose }: { init: { tripId: string; activity?: Ac
           <Segmented value={f.status || 'confirmed'} onChange={v => set({ status: v as BookingStatus })} options={[{ value: 'confirmed', label: 'Confirmed' }, { value: 'pending', label: 'Pending' }, { value: 'planned', label: 'Not booked' }]} />
         </div>
 
+        {trip?.travellers && trip.travellers.length > 1 && (
+          <div>
+            <span className="lbl">Who is travelling</span>
+            <div className="flex flex-wrap gap-2">
+              {trip.travellers.map(n => {
+                const on = !f.travellers?.length || f.travellers.includes(n);
+                const toggle = () => {
+                  const cur = f.travellers?.length ? f.travellers : trip.travellers!;
+                  const next = on ? cur.filter(x => x !== n) : [...cur, n];
+                  set({ travellers: next.length && next.length < trip.travellers!.length ? trip.travellers!.filter(x => next.includes(x)) : undefined });
+                };
+                return <button key={n} onClick={toggle} aria-pressed={on} className={`rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold border transition ${on ? 'bg-petrol-fill text-white border-transparent' : 'bg-card border-line text-muted'}`}>{n}</button>;
+              })}
+            </div>
+            <p className="text-[12.5px] text-muted mt-1.5">{f.travellers?.length ? f.travellers.join(', ') : 'Everyone'}</p>
+          </div>
+        )}
+
         <Field label={spec.title}><input id="act-title" className="inp" value={f.title} placeholder={spec.titlePh} onChange={e => set({ title: e.target.value })} /></Field>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -2561,6 +2868,29 @@ function ActivityForm({ init, onClose }: { init: { tripId: string; activity?: Ac
           </div>
         )}
 
+        <div>
+          <span className="lbl">Price</span>
+          <div className="grid grid-cols-[minmax(0,1fr)_110px] gap-3">
+            <input id="act-cost" className="inp" type="number" inputMode="decimal" step="0.01" min="0" placeholder="e.g. 412.00" value={f.cost?.amount ?? ''}
+              onChange={e => { const v = e.target.value === '' ? NaN : +e.target.value; set({ cost: isNaN(v) ? undefined : { currency: 'EUR', ...f.cost, amount: v, paidAmount: !f.cost || f.cost.paidAmount >= f.cost.amount ? v : f.cost.paidAmount } }); }} />
+            <input id="act-currency" className="inp uppercase" list="currencies" maxLength={3} value={f.cost?.currency || 'EUR'} disabled={!f.cost}
+              onChange={e => f.cost && set({ cost: { ...f.cost, currency: e.target.value.toUpperCase() } })} aria-label="Currency" />
+            <datalist id="currencies">{['EUR', 'USD', 'CNY', 'AED', 'SGD', 'IDR', 'GBP', 'CHF', 'HKD'].map(c => <option key={c} value={c} />)}</datalist>
+          </div>
+          {f.cost && (
+            <div className="mt-3 space-y-3">
+              <Segmented value={f.cost.paidAmount >= f.cost.amount ? 'paid' : f.cost.paidAmount > 0 ? 'part' : 'open'} onChange={v => set({ cost: { ...f.cost!, paidAmount: v === 'paid' ? f.cost!.amount : v === 'open' ? 0 : Math.min(f.cost!.paidAmount || 0, f.cost!.amount) || +(f.cost!.amount / 2).toFixed(2) } })}
+                options={[{ value: 'paid', label: 'Paid' }, { value: 'part', label: 'Partly paid' }, { value: 'open', label: 'Not paid' }]} />
+              {f.cost.paidAmount < f.cost.amount && (
+                <div className="grid grid-cols-2 gap-3">
+                  {f.cost.paidAmount > 0 && <Field label="Already paid"><input id="act-paid" className="inp" type="number" inputMode="decimal" step="0.01" min="0" value={f.cost.paidAmount} onChange={e => set({ cost: { ...f.cost!, paidAmount: Math.max(0, +e.target.value || 0) } })} /></Field>}
+                  <Field label="Payment due"><input id="act-pay-due" className="inp" type="date" value={f.cost.due || ''} onChange={e => set({ cost: { ...f.cost!, due: e.target.value || undefined } })} /></Field>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {!init.activity && <Field label="Note (optional)"><textarea id="act-note" className="inp" value={firstNote} placeholder="e.g. Bring product samples." onChange={e => setFirstNote(e.target.value)} /></Field>}
 
         {err && <div className="rounded-xl bg-danger/10 text-danger px-4 py-3 text-[14px]">{err}</div>}
@@ -2583,16 +2913,17 @@ function TripForm({ trip, onClose }: { trip: Trip | null; onClose: () => void })
   const coverPreview = useMemo(() => (coverFile ? URL.createObjectURL(coverFile) : ''), [coverFile]);
   const coverRef = useRef<HTMLInputElement>(null);
   const shownCover = coverPreview || (coverRemoved ? '' : existingCover);
-  const [f, setF] = useState(() => trip ? { ...trip, countriesText: trip.countries.join(', '), citiesText: trip.cities.join(', ') }
-    : { id: uid(), name: '', kind: 'business', countries: [], cities: [], start: td, end: addDays(td, 3), archived: false, countriesText: '', citiesText: '' });
+  const [f, setF] = useState(() => trip ? { ...trip, countriesText: trip.countries.join(', '), citiesText: trip.cities.join(', '), travellersText: (trip.travellers || []).join(', ') }
+    : { id: uid(), name: '', kind: 'business', countries: [], cities: [], start: td, end: addDays(td, 3), archived: false, countriesText: '', citiesText: '', travellersText: '' });
   const [err, setErr] = useState('');
   const set = (p: any) => setF((x: any) => ({ ...x, ...p }));
   const split = (s: string) => s.split(/[,→>]/).map(x => x.trim()).filter(Boolean);
   const submit = () => {
     if (!f.name.trim()) { setErr('Enter a name for the trip.'); return; }
     if (!f.start || !f.end || f.end < f.start) { setErr('The end date must be on or after the start date.'); return; }
-    const { countriesText, citiesText, ...rest } = f as any;
-    saveTrip({ ...rest, name: f.name.trim(), countries: split(countriesText), cities: split(citiesText) });
+    const { countriesText, citiesText, travellersText, ...rest } = f as any;
+    const travellers = split(travellersText);
+    saveTrip({ ...rest, name: f.name.trim(), countries: split(countriesText), cities: split(citiesText), travellers: travellers.length > 1 ? travellers : undefined });
     if (coverFile) setCover(f.id, coverFile);
     else if (coverRemoved) setCover(f.id, null);
     ui.toast(trip ? 'Trip saved' : 'Trip created');
@@ -2611,6 +2942,10 @@ function TripForm({ trip, onClose }: { trip: Trip | null; onClose: () => void })
         </div>
         <Field label="Countries"><input id="trip-countries" className="inp" value={f.countriesText} placeholder="e.g. China" onChange={e => set({ countriesText: e.target.value })} /></Field>
         <Field label="Cities (in order)"><input id="trip-cities" className="inp" value={f.citiesText} placeholder="e.g. Shanghai, Xiamen, Guangzhou" onChange={e => set({ citiesText: e.target.value })} /></Field>
+        <div>
+          <Field label="Travellers (optional)"><input id="trip-travellers" className="inp" value={(f as any).travellersText} placeholder="e.g. Kian, Leila, Minoo" onChange={e => set({ travellersText: e.target.value })} /></Field>
+          <p className="text-[12.5px] text-muted mt-1.5">For trips with several people: you can then mark who is on each flight or hotel and filter the timeline per person.</p>
+        </div>
         <div>
           <span className="lbl">Cover photo</span>
           <div className="flex items-center gap-4">

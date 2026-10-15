@@ -24,8 +24,18 @@ const META_KEY = 'mtp:sync:v1';
 const loadMeta = (): Meta => { try { return JSON.parse(localStorage.getItem(META_KEY) || '') || { connected: false }; } catch { return { connected: false }; } };
 const saveMeta = (m: Meta) => { try { localStorage.setItem(META_KEY, JSON.stringify(m)); } catch { /* storage unavailable */ } };
 
-const strip = (d: SyncData): SyncData => ({ version: d.version, trips: d.trips || [], activities: d.activities || [], contacts: d.contacts || [], documents: d.documents || [] });
-const canon = (d?: SyncData) => (d ? JSON.stringify([d.trips, d.activities, d.contacts, d.documents || []]) : '');
+const strip = (d: SyncData): SyncData => ({ version: d.version, trips: d.trips || [], activities: d.activities || [], contacts: d.contacts || [], documents: d.documents || [], deleted: d.deleted || {} });
+const canon = (d?: SyncData) => (d ? JSON.stringify([d.trips, d.activities, d.contacts, d.documents || [], d.deleted || {}]) : '');
+
+// Deleted items leave a dated marker ("tombstone"), so a device with an old copy can't bring them back.
+const TOMBSTONE_DAYS = 400;
+function withTombstones(data: SyncData, ...sources: (SyncData | undefined)[]): SyncData {
+  const cutoff = new Date(Date.now() - TOMBSTONE_DAYS * 864e5).toISOString().slice(0, 10);
+  const deleted: Record<string, string> = {};
+  [data, ...sources].forEach(s => Object.entries(s?.deleted || {}).forEach(([id, at]) => { if (String(at) >= cutoff && (!deleted[id] || deleted[id] < at)) deleted[id] = at as string; }));
+  const keep = (l: Item[] = []) => l.filter(x => !deleted[x.id]);
+  return { ...data, trips: keep(data.trips), activities: keep(data.activities), contacts: keep(data.contacts), documents: keep(data.documents), deleted };
+}
 const EMPTY: SyncData = { trips: [], activities: [], contacts: [], documents: [] };
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -51,7 +61,7 @@ function merge(base: SyncData, local: SyncData, remote: SyncData) {
   const a = mergeList(base.activities, local.activities, remote.activities);
   const c = mergeList(base.contacts, local.contacts, remote.contacts);
   const d = mergeList(base.documents || [], local.documents || [], remote.documents || []);
-  return { data: { ...strip(remote), trips: t.list, activities: a.list, contacts: c.list, documents: d.list }, conflicts: t.conflicts + a.conflicts + c.conflicts + d.conflicts };
+  return { data: withTombstones({ ...strip(remote), trips: t.list, activities: a.list, contacts: c.list, documents: d.list }, local), conflicts: t.conflicts + a.conflicts + c.conflicts + d.conflicts };
 }
 
 // Ids of the built-in demo data (current and older app versions). They must never reach Drive.
@@ -65,8 +75,8 @@ function adopt(local: SyncData, remote: SyncData): SyncData {
     return [...r, ...l.filter(x => !ids.has(x.id) && !SAMPLE_IDS.has(x.id) && !(extra && extra(x)))];
   };
   const fromSample = (x: any) => SAMPLE_IDS.has(x.tripId);
-  return { ...strip(remote), trips: add(local.trips, remote.trips), activities: add(local.activities, remote.activities, fromSample),
-    contacts: add(local.contacts, remote.contacts), documents: add(local.documents, remote.documents, fromSample) };
+  return withTombstones({ ...strip(remote), trips: add(local.trips, remote.trips), activities: add(local.activities, remote.activities, fromSample),
+    contacts: add(local.contacts, remote.contacts), documents: add(local.documents, remote.documents, fromSample) }, local);
 }
 
 export function useDriveSync(data: SyncData, replaceData: (d: SyncData) => void) {
