@@ -670,6 +670,39 @@ function DayHeader({ date, index, cities, hotel }: { date: string; index?: numbe
   );
 }
 
+/** Several days in a row with nothing planned, e.g. a beach week: one line instead of a header per day. */
+function QuietDays({ trip, acts, from, to, i }: { trip: Trip; acts: Activity[]; from: string; to: string; i: number }) {
+  const ui = useUI();
+  const n = daysBetween(from, to) + 1;
+  const td = todayStr();
+  const hotels = Array.from({ length: n }, (_, k) => hotelFor(acts, addDays(from, k)));
+  const hotel = hotels[0] && hotels.every(h => h?.id === hotels[0]!.id) ? hotels[0] : undefined;
+  const short = (s: string) => fmt(s, { day: 'numeric', month: 'short' });
+  return (
+    <section className="anim-in">
+      <div className="mb-3 pb-3 border-b border-cognac/30">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <span className="text-[12px] font-bold uppercase tracking-[0.16em] text-cognac">{fmt(from, { weekday: 'short' })} – {fmt(to, { weekday: 'short' })}</span>
+            <span className="font-display text-[21px] leading-none text-cognac">{short(from)} – {short(to)}</span>
+            {td >= from && td <= to && <span className="rounded-full bg-cognac text-[#1a120b] text-[11px] font-bold px-2 py-0.5 uppercase tracking-wider">Today</span>}
+          </div>
+          <span className="text-[12px] text-muted font-semibold">Days {i + 1}–{i + n}</span>
+        </div>
+        {hotel && (
+          <button onClick={() => ui.openActivity(hotel.id)} className="mt-1.5 block text-left text-[13px] text-muted hover:text-petrol">
+            <Icon name="bed" size={14} className="inline -mt-0.5 mr-1.5" />Overnight: <span className="text-ink/85">{hotel.title}</span>
+          </button>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-line px-4 py-3.5 text-[14px] text-muted">
+        <span>{plural(n, 'day', 'days')} without plans{hotel ? ' · free time' : ''}</span>
+        <button onClick={() => ui.newActivity(trip.id, from)} className="flex items-center gap-1 text-petrol font-semibold hover:underline shrink-0"><Icon name="plus" size={15} />Add</button>
+      </div>
+    </section>
+  );
+}
+
 function Timeline({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
   const ui = useUI();
   const next = findNext(entries);
@@ -681,9 +714,19 @@ function Timeline({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entri
 
   if (!entries.length) return <Empty icon="list" title="Nothing planned yet" text="Add flights, hotels, meetings and transfers. They appear here in chronological order." action={<button className="btn btn-primary" onClick={() => ui.newActivity(trip.id)}><Icon name="plus" />Add activity</button>} />;
 
+  // Runs of two or more consecutive days without plans are shown as one compact block.
+  const blocks: { from: string; to: string; i: number }[] = [];
+  sorted.forEach((date, i) => {
+    const last = blocks[blocks.length - 1];
+    if (!(byDate[date] || []).length && last && !(byDate[last.from] || []).length && addDays(last.to, 1) === date) last.to = date;
+    else blocks.push({ from: date, to: date, i });
+  });
+
   return (
     <div className="space-y-9">
-      {sorted.map((date, i) => {
+      {blocks.map(({ from, to, i }) => {
+        if (from !== to) return <QuietDays key={from} trip={trip} acts={acts} from={from} to={to} i={i} />;
+        const date = from;
         const list = byDate[date] || [];
         return (
           <section key={date} className="anim-in" style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}>
@@ -1407,8 +1450,8 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
   const days = daysBetween(trip.start, trip.end) + 1;
   const docCount = data.documents.filter((d: Doc) => d.tripId === trip.id && !d.cover).length;
   const todoCount = tripTodos(trip, allActs).count;
-  const filterable = tab === 'timeline' || tab === 'today' || tab === 'calendar';
-  const td = todayStr();
+  // "Today" and "Calendar" were folded into the timeline; old links land there.
+  if (tab === 'today' || tab === 'calendar') tab = 'timeline';
 
   return (
     <div>
@@ -1443,8 +1486,6 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
       <div className="sticky top-[env(safe-area-inset-top,0px)] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mt-5 mb-6 bg-cream/90 backdrop-blur-md border-b border-line flex items-center justify-between gap-3">
         <div className="min-w-0 overflow-x-auto no-scrollbar"><Segmented value={tab} onChange={t => go(`#/trip/${trip.id}/${t}`)} options={[
           { value: 'timeline', label: 'Timeline', icon: 'list' },
-          { value: 'today', label: 'Today', icon: 'clock' },
-          { value: 'calendar', label: 'Calendar', icon: 'calendar' },
           { value: 'documents', label: `Docs${docCount ? ` ${docCount}` : ''}`, icon: 'file' },
           { value: 'todos', label: `To-dos${todoCount ? ` ${todoCount}` : ''}`, icon: 'check' },
           { value: 'costs', label: 'Costs', icon: 'wallet' },
@@ -1452,15 +1493,13 @@ function TripPage({ id, tab }: { id: string; tab: string }) {
         <button onClick={() => ui.newActivity(trip.id)} className="hidden md:inline-flex btn btn-primary h-10"><Icon name="plus" />Activity</button>
       </div>
 
-      {filterable && <TravellerFilter trip={trip} who={who} onChange={setWho} />}
+      {tab === 'timeline' && <TravellerFilter trip={trip} who={who} onChange={setWho} />}
       {tab === 'timeline' && <div className="max-w-3xl"><Timeline trip={trip} acts={acts} entries={entries} /></div>}
-      {tab === 'calendar' && <CalendarView entries={entries} initialDate={td >= trip.start && td <= trip.end ? td : trip.start} ranges={[trip]} />}
       {tab === 'documents' && <TripDocuments trip={trip} acts={allActs} entries={buildEntries(allActs)} />}
-      {tab === 'today' && <TripToday key={trip.id} trip={trip} acts={acts} entries={entries} />}
       {tab === 'todos' && <TripTodos trip={trip} acts={allActs} entries={buildEntries(allActs)} />}
       {tab === 'costs' && <TripCosts trip={trip} acts={allActs} />}
 
-      {(tab === 'timeline' || tab === 'calendar') && (
+      {tab === 'timeline' && (
         <button onClick={() => ui.newActivity(trip.id)} aria-label="Add activity" className="md:hidden fixed right-5 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-30 h-14 w-14 rounded-full bg-primary text-white grid place-items-center shadow-lift active:scale-95 transition"><Icon name="plus" size={24} stroke={2} /></button>
       )}
     </div>
@@ -1537,68 +1576,6 @@ function TaxiCard({ id, onClose }: { id: string; onClose: () => void }) {
         <a href={`https://uri.amap.com/search?keyword=${q}&callnative=1`} target="_blank" rel="noopener" className="btn h-12 bg-[#1170b8] text-white text-[14px]">Amap 高德</a>
         <button onClick={copy} className="btn h-12 bg-black/5 text-[#141414] text-[14px]">Copy</button>
       </div>
-    </div>
-  );
-}
-
-/** One day of the trip at a glance: the day's stages, the next one highlighted, and tonight's hotel. */
-function TripToday({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
-  const ui = useUI();
-  const td = todayStr();
-  const inTrip = td >= trip.start && td <= trip.end;
-  const [day, setDay] = useState(inTrip ? td : td < trip.start ? trip.start : trip.end);
-  const list = entries.filter(e => e.date === day);
-  const next = findNext(entries);
-  const hotel = hotelFor(acts, day);
-  const cities = dayCities(acts, list, day);
-  const idx = daysBetween(trip.start, day) + 1;
-  const total = daysBetween(trip.start, trip.end) + 1;
-  const hotelTaxi = hotel ? taxiTarget(hotel) : null;
-  const dueToday = tripTodos(trip, acts).deadlines.filter(d => d.date === day || (day === td && d.date < td));
-  return (
-    <div className="max-w-3xl">
-      <div className="flex items-center gap-3 mb-5">
-        <button onClick={() => setDay(addDays(day, -1))} disabled={day <= trip.start} aria-label="Previous day" className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-card border border-line text-heading disabled:opacity-30"><Icon name="left" /></button>
-        <div className="flex-1 min-w-0 text-center">
-          <div className="text-[11.5px] font-bold uppercase tracking-[0.16em] text-cognac">{day === td ? 'Today' : fmt(day, { weekday: 'long' })} · Day {idx} of {total}</div>
-          <div className="font-display text-[24px] leading-tight text-cognac">{fmtDM(day)}</div>
-          {cities.length > 0 && <div className="text-[12.5px] font-bold uppercase tracking-[0.12em] text-heading mt-0.5 truncate">{cities.join(' → ')}</div>}
-        </div>
-        <button onClick={() => setDay(addDays(day, 1))} disabled={day >= trip.end} aria-label="Next day" className="h-11 w-11 shrink-0 grid place-items-center rounded-full bg-card border border-line text-heading disabled:opacity-30"><Icon name="right" /></button>
-      </div>
-      {!inTrip && td < trip.start && <p className="mb-4 text-center text-[13px] text-muted">Your trip starts in {plural(daysBetween(td, trip.start), 'day', 'days')}. During the trip, this page opens on the current day.</p>}
-      {dueToday.length > 0 && (
-        <section className="mb-5 rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
-          <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-cognac mb-2 flex items-center gap-2"><Icon name="flag" size={14} />Deadlines</h3>
-          <div className="space-y-1.5">
-            {dueToday.map(d => (
-              <button key={d.key} onClick={() => ui.openActivity(d.a.id)} className="w-full flex items-start gap-2 text-left">
-                <Icon name={d.kind === 'payment' ? 'wallet' : 'check'} size={15} className="text-cognac mt-0.5" />
-                <span className="min-w-0 flex-1 text-[14px] text-ink">{d.text}<span className="block text-[12px] text-muted">{d.date < day ? `Overdue since ${fmtShort(d.date)} · ` : ''}{d.a.title}</span></span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {list.length ? list.map((e, j) => <EntryRow key={e.key} e={e} next={next} last={j === list.length - 1} />)
-        : <Empty icon="calendar" title="Nothing planned" text="No stages on this day." action={<button className="btn btn-primary" onClick={() => ui.newActivity(trip.id, day)}><Icon name="plus" />Add activity</button>} />}
-
-      {hotel && (
-        <section className="mt-7">
-          <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-2.5 flex items-center gap-2"><Icon name="bed" size={15} />Tonight</h3>
-          <div className="tone-hotel tone-card rounded-2xl p-4">
-            <button onClick={() => ui.openActivity(hotel.id)} className="block text-left w-full">
-              <div className="text-[16px] font-semibold text-ink">{hotel.title}</div>
-              {hotel.details.address && <div className="text-[13px] tone-ink mt-0.5">{hotel.details.address}</div>}
-            </button>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {hotelTaxi && <button onClick={() => ui.taxi(hotel.id)} className="btn h-10 px-4 bg-cognac text-[#1a1009] text-[14px]"><Icon name="car" size={16} />Show to driver</button>}
-              {hotel.details.phone && <a href={`tel:${hotel.details.phone.replace(/\s/g, '')}`} className="btn btn-ghost h-10 px-4 text-[14px]"><Icon name="phone" size={15} />Call hotel</a>}
-            </div>
-          </div>
-        </section>
-      )}
     </div>
   );
 }
