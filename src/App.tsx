@@ -1295,7 +1295,7 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
           <div className="flex items-start justify-between gap-2">
             <button onClick={open} className="text-left min-w-0 pt-1">
               <div className="text-[12px] font-bold tracking-[0.14em] text-cognac tabular-nums">{rangeCaps(trip.start, trip.end)}</div>
-              <h3 className="text-[19px] sm:text-[21px] font-medium leading-tight tracking-[-0.01em] text-heading mt-1">{trip.name}</h3>
+              <h3 className="text-[19px] sm:text-[21px] font-medium leading-tight tracking-[-0.01em] text-heading mt-1 line-clamp-2">{trip.name}</h3>
             </button>
             <div className="-mr-1 -mt-0.5 shrink-0">
               <Menu items={[
@@ -1308,13 +1308,14 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
             </div>
           </div>
           <button onClick={open} className="block text-left w-full">
+            {/* Long routes are shortened to start → … → end; the full route is on the trip page. */}
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[14px] text-muted">
-              {trip.cities.map((c, i) => <React.Fragment key={c + i}>{i > 0 && <Icon name="arrow" size={12} className="opacity-60" />}<span>{c}</span></React.Fragment>)}
+              {(trip.cities.length > 3 ? [trip.cities[0], '…', trip.cities[trip.cities.length - 1]] : trip.cities).map((c, i) => <React.Fragment key={c + i}>{i > 0 && <Icon name="arrow" size={12} className="opacity-60" />}<span>{c}</span></React.Fragment>)}
+              {trip.cities.length > 3 && <span className="text-muted/80">· {trip.cities.length} cities</span>}
             </div>
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-muted">
               <span className="flex items-center gap-1.5"><Icon name="globe" size={14} />{trip.countries.join(', ')}</span>
               <span className="flex items-center gap-1.5"><Icon name="calendar" size={14} />{plural(days, 'day', 'days')}</span>
-              <span className="flex items-center gap-1.5"><Icon name="list" size={14} />{plural(count, 'activity', 'activities')}</span>
               {status === 'ongoing' && <span className="flex items-center gap-1.5 text-cognac font-semibold"><span className="h-1.5 w-1.5 rounded-full bg-cognac pulse-dot" />Ongoing</span>}
               {trip.archived && <span className="font-semibold">Archived</span>}
             </div>
@@ -1733,7 +1734,9 @@ function tripTodos(trip: Trip, acts: Activity[]) {
   const tasks = undated.filter(x => !nowTasks.includes(x));
   const warnings = sorted.flatMap(a => a.notes.filter(n => n.text.trim().startsWith('⚠')).map(n => ({ a, n })));
   const count = now.deadlines.length + nowTasks.length + now.gaps.length + now.issues.length + now.notBooked.length;
-  return { now: { ...now, tasks: nowTasks }, later, waiting, tbc, tasks, warnings, deadlines, gaps, issues, count };
+  // A booking that already has something to do now isn't listed again under "waiting".
+  const inNow = new Set([...now.deadlines.map(d => d.a.id), ...nowTasks.map(x => x.a.id), ...now.issues.map(i => i.a?.id)]);
+  return { now: { ...now, tasks: nowTasks }, later, waiting: waiting.filter(a => !inNow.has(a.id)), tbc, tasks, warnings, deadlines, gaps, issues, count };
 }
 
 function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {

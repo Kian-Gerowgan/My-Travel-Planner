@@ -8,7 +8,7 @@
   :root {
     --nav: 14 33 29; --primary: 22 96 80; --heading: 236 240 237; --cognac: 217 154 96;
     --petrol: 50 159 255; --petrolfill: 22 139 223; --pale: 18 34 40; --cream: 9 17 15;
-    --ink: 236 240 237; --card: 16 26 23; --muted: 150 162 157; --line: 34 48 44; --danger: 232 132 116;
+    --ink: 236 240 237; --card: 16 26 23; --muted: 178 189 184; --line: 34 48 44; --danger: 234 94 86;
     --dot: 50 159 255;
     /* Event colour system: primary, highlight (borders, icons, text accents) and text ink */
     --transport: 22 139 223; --transport-hi: 50 159 255; --transport-ink: 92 182 255;
