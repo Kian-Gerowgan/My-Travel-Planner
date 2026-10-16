@@ -1339,8 +1339,13 @@ function NextUp() {
   const tone = toneOf(e.a.type);
   const where = [e.a.city || (e.a.type === 'flight' || e.a.type === 'train' ? place(e.a.details.from) : ''), trip?.countries[0]].filter(Boolean).join(' · ');
   const when = e.ms <= Date.now() ? 'Happening now' : relText(e) === 'tomorrow' ? 'Tomorrow' : relText(e).replace(/^in /, 'In ');
+  // One tap to the ticket at the gate or platform: the stage's document, preferring tickets / boarding passes / vouchers.
+  const docs: Doc[] = data.documents.filter((d: Doc) => !d.cover && d.activityIds.includes(e.a.id));
+  const ticket = docs.find(d => /ticket|boarding|bordkarte|pass|voucher|confirmation|best[äa]tigung/i.test(d.name)) || docs[0];
+  const ticketLabel = e.a.type === 'hotel' ? 'Show booking' : isTransport(e.a) ? 'Show ticket' : 'Show document';
+  const open = () => ui.openActivity(e.a.id);
   return (
-    <button onClick={() => ui.openActivity(e.a.id)} className={`tone-press anim-in relative w-full overflow-hidden text-left rounded-[26px] p-5 tone-${tone} tone-card tone-hero`}>
+    <div role="button" tabIndex={0} onClick={open} onKeyDown={k => { if (k.key === 'Enter') open(); }} className={`tone-press anim-in relative w-full overflow-hidden text-left rounded-[26px] p-5 cursor-pointer tone-${tone} tone-card tone-hero`}>
       <Icon name={TYPE_META[e.a.type].icon} size={150} stroke={1} className="absolute -right-6 -top-5 opacity-[0.10] text-white pointer-events-none" />
       <div className="relative text-[12px] font-bold uppercase tracking-[0.24em] tone-ink">{when}</div>
       <div className="relative mt-2.5 flex items-center gap-4">
@@ -1350,9 +1355,18 @@ function NextUp() {
           <div className="text-[14.5px] text-white/75 mt-1">{fmtShort(e.date)} · {e.time}{e.endTime ? '–' + e.endTime : ''}</div>
           {where && <div className="text-[14.5px] text-white/75">{where}</div>}
         </div>
-        <span className="self-end h-10 w-10 rounded-full grid place-items-center tone-icon shrink-0"><Icon name="right" size={18} /></span>
+        {!ticket && <span className="self-end h-10 w-10 rounded-full grid place-items-center tone-icon shrink-0"><Icon name="right" size={18} /></span>}
       </div>
-    </button>
+      {ticket && (
+        <div className="relative mt-4 flex items-center gap-2">
+          <button onClick={ev => { ev.stopPropagation(); ui.viewDoc(ticket.id); }} className="btn h-11 px-4 bg-white text-[#0f1a2a] text-[14.5px] font-semibold shadow-soft">
+            <Icon name="file" size={17} stroke={2} />{ticketLabel}
+          </button>
+          {docs.length > 1 && <span className="text-[12.5px] text-white/70">+{docs.length - 1} more in details</span>}
+          <span className="ml-auto h-10 w-10 rounded-full grid place-items-center tone-icon shrink-0"><Icon name="right" size={18} /></span>
+        </div>
+      )}
+    </div>
   );
 }
 
