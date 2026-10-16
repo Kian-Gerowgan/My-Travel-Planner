@@ -2365,6 +2365,54 @@ function AppLogo({ size = 44 }: { size?: number }) {
 const PROFILE_KEY = 'mtp:profile-name';
 const profileName = () => { try { return localStorage.getItem(PROFILE_KEY) ?? 'Kian Gerowgan'; } catch { return 'Kian Gerowgan'; } };
 
+/** Pull down at the top of a page to sync with Google Drive and look for a new app version. */
+function PullToRefresh({ onRefresh }: { onRefresh: () => Promise<void> }) {
+  const [pull, setPull] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const st = useRef({ y0: 0, active: false, pull: 0, busy: false });
+  const TRIGGER = 72;
+  useEffect(() => {
+    const s = st.current;
+    const start = (e: TouchEvent) => {
+      // only at the very top, and not while a sheet or dialog is open
+      s.active = !s.busy && window.scrollY <= 0 && document.body.style.overflow !== 'hidden' && e.touches.length === 1;
+      s.y0 = e.touches[0].clientY; s.pull = 0;
+    };
+    const move = (e: TouchEvent) => {
+      if (!s.active) return;
+      const dy = e.touches[0].clientY - s.y0;
+      if (dy <= 0 || window.scrollY > 0) { if (s.pull) { s.pull = 0; setPull(0); } return; }
+      s.pull = Math.min(130, dy * 0.55); setPull(s.pull);
+    };
+    const end = async () => {
+      if (!s.active) return;
+      s.active = false;
+      const go = s.pull >= TRIGGER;
+      s.pull = 0; setPull(0);
+      if (!go) return;
+      s.busy = true; setBusy(true);
+      try { await Promise.all([onRefresh(), new Promise(r => setTimeout(r, 700))]); } finally { s.busy = false; setBusy(false); }
+    };
+    window.addEventListener('touchstart', start, { passive: true });
+    window.addEventListener('touchmove', move, { passive: true });
+    window.addEventListener('touchend', end);
+    window.addEventListener('touchcancel', end);
+    return () => { window.removeEventListener('touchstart', start); window.removeEventListener('touchmove', move); window.removeEventListener('touchend', end); window.removeEventListener('touchcancel', end); };
+  }, [onRefresh]);
+  const shown = busy ? TRIGGER : pull;
+  if (!shown) return null;
+  const ready = busy || pull >= TRIGGER;
+  return (
+    <div className="lg:hidden fixed inset-x-0 z-[46] flex justify-center pointer-events-none" style={{ top: `calc(env(safe-area-inset-top, 0px) + ${Math.round(shown * 0.6)}px)` }} aria-live="polite">
+      <div className={`h-10 w-10 rounded-full grid place-items-center border shadow-lift transition-colors ${ready ? 'bg-primary text-white border-transparent' : 'bg-card text-muted border-line'}`}
+        style={{ opacity: Math.min(1, shown / 40) }}>
+        <span style={busy ? undefined : { transform: `rotate(${Math.round(pull * 3)}deg)` }} className="grid place-items-center"><Icon name="refresh" size={18} stroke={2} className={busy ? 'animate-spin' : ''} /></span>
+        <span className="sr-only">{busy ? 'Refreshing' : ready ? 'Release to refresh' : 'Pull to refresh'}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Header button showing Google Drive sync status; tap to sync (or set up). */
 function SyncButton() {
   const { sync } = useStore();
@@ -3086,9 +3134,16 @@ export function App() {
   }), []);
 
   const active = route.page === 'trip' ? 'trips' : route.page;
+  const { sync } = useStore();
+  // Pull-to-refresh: get the latest data from Drive and install a new app version if there is one.
+  const refresh = useCallback(async () => {
+    const [found] = await Promise.all([appUpdate.checkNow(), sync.connected ? sync.syncNow() : null]);
+    if (!found) ui.toast(navigator.onLine ? (sync.connected ? 'Up to date' : 'App is up to date') : 'Offline – showing saved data');
+  }, [appUpdate, sync, ui]);
 
   return (
     <UICtx.Provider value={ui}>
+      <PullToRefresh onRefresh={refresh} />
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex fixed inset-y-0 left-0 w-64 bg-nav text-white flex-col z-30 border-r border-white/5">
         <a href="#/trips" className="px-5 pt-8 pb-10 block">
