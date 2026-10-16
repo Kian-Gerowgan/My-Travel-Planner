@@ -196,7 +196,7 @@ function finish(g, c) {
 /* ---------- scenes ---------- */
 const SCENES = {
   shanghai: {
-    sun: [83, 50], look: 'night',
+    sun: [76, 60], look: 'dusk',
     draw(g, sun) {
       skyline(g, sun, [[0, 55, 7], [7, 50, 5], [13, 57, 6], [36, 47, 5], [42, 53, 4], [70, 49, 5], [76, 44, 6, 'pyr'], [84, 52, 5], [90, 47, 6], [96, 54, 5]], 0.95, [70, 80, 110]);
       haze(g, 40, 0.22);
@@ -299,18 +299,33 @@ const SCENES = {
   },
 };
 
-function renderScene(name) {
+/* Extra moods, used to try alternatives for a destination */
+Object.assign(LOOKS, {
+  pink: { sky: [[0, [60, 72, 142]], [0.35, [150, 104, 172]], [0.6, [236, 124, 152]], [0.8, [255, 152, 132]], [1, [255, 204, 164]]],
+    glow: 0.9, haze: [255, 170, 170], fog: [190, 150, 172], tone: [84, 74, 112], grade: ['rgba(130,110,200,0.22)', 'rgba(255,130,150,0.22)', 'rgba(50,50,120,0.3)'] },
+  dawn: { sky: [[0, [118, 160, 202]], [0.4, [170, 196, 216]], [0.7, [236, 206, 200]], [0.9, [255, 216, 190]], [1, [255, 234, 212]]],
+    glow: 0.7, haze: [240, 216, 210], fog: [206, 200, 212], grade: ['rgba(150,190,220,0.2)', 'rgba(255,200,180,0.15)', 'rgba(60,100,130,0.25)'] },
+  dusk: { sky: [[0, [42, 42, 92]], [0.35, [112, 72, 122]], [0.6, [222, 102, 80]], [0.82, [255, 142, 62]], [1, [255, 192, 102]]],
+    glow: 1.2, haze: [255, 150, 100], fog: [172, 122, 132], tone: [72, 62, 84], grade: ['rgba(110,80,160,0.22)', 'rgba(255,140,80,0.28)', 'rgba(40,40,90,0.35)'] },
+});
+
+/* opts: { look, sun: [x, y], zoom, cx } – zoom scales the skyline around x = cx (e.g. to make the Pearl Tower dominant) */
+function renderScene(name, opts = {}) {
   seed = 3;
   const sc = SCENES[name];
-  LOOK = LOOKS[sc.look || 'golden'];
+  LOOK = LOOKS[opts.look || sc.look || 'golden'];
+  const sun = opts.sun || sc.sun;
   const c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d', { willReadFrequently: true });
-  paintSky(g, sc.sun);
-  sc.draw(g, sc.sun);
+  paintSky(g, sun);
+  g.save();
+  if (opts.zoom) { const z = opts.zoom, cx = P(opts.cx ?? 50), cy = P(H); g.translate(cx, cy); g.scale(z, z); g.translate(-cx, -cy); }
+  sc.draw(g, sun);
+  g.restore();
   haze(g, 60, 0.1);
   const above = document.createElement('canvas'); above.width = above.height = S;
   above.getContext('2d').drawImage(c, 0, 0);
-  water(g, above, sc.sun);
+  water(g, above, sun);
   finish(g, c);
   const o = document.createElement('canvas'); o.width = o.height = 720;
   const og = o.getContext('2d'); og.imageSmoothingQuality = 'high'; og.filter = 'contrast(1.18) saturate(1.22)'; og.drawImage(c, 0, 0, 720, 720);
@@ -328,6 +343,31 @@ window.renderAll = () => {
     console.log(n, Math.round(performance.now() - t) + 'ms');
   }
   return Object.fromEntries(Object.entries(window.out).map(([k, v]) => [k, v.length]));
+};
+
+/* Several alternatives for one destination, on a labelled contact sheet (also shown at real tile size). */
+window.renderOptions = (name, list) => {
+  document.body.innerHTML = '';
+  window.opts = {};
+  const T = 400, cols = 3, rows = Math.ceil(list.length / cols);
+  const sheet = document.createElement('canvas'); sheet.width = cols * (T + 24) + 24; sheet.height = rows * (T + 190) + 24;
+  const sg = sheet.getContext('2d');
+  sg.fillStyle = '#0E1412'; sg.fillRect(0, 0, sheet.width, sheet.height);
+  list.forEach((o, i) => {
+    const c = renderScene(name, o);
+    window.opts[o.id] = c.toDataURL('image/jpeg', 0.88);
+    const x = 24 + (i % cols) * (T + 24), y = 24 + Math.floor(i / cols) * (T + 190);
+    const clip = (px, py, w, r) => { sg.beginPath(); sg.roundRect(px, py, w, w, r); sg.clip(); };
+    sg.save(); clip(x, y, T, 34); sg.drawImage(c, x, y, T, T); sg.restore();
+    // real tile size (104 px on the phone ≈ 2× here) on the card background
+    sg.fillStyle = '#171E1C'; sg.beginPath(); sg.roundRect(x, y + T + 14, T, 120, 22); sg.fill();
+    sg.save(); clip(x + 14, y + T + 26, 96, 18); sg.drawImage(c, x + 14, y + T + 26, 96, 96); sg.restore();
+    sg.fillStyle = '#F2EEE6'; sg.font = '600 34px sans-serif'; sg.fillText(o.id, x + 132, y + T + 70);
+    sg.fillStyle = '#9AA6A0'; sg.font = '22px sans-serif'; sg.fillText(o.label, x + 132, y + T + 104);
+  });
+  window.sheet = sheet.toDataURL('image/jpeg', 0.86);
+  const im = new Image(); im.src = window.sheet; im.style.cssText = 'width:100%;max-width:1300px'; document.body.append(im);
+  return Object.keys(window.opts);
 };
 </script>
 </body></html>
