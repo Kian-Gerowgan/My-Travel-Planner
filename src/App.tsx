@@ -1359,7 +1359,7 @@ function NextUp() {
       </div>
       {ticket && (
         <div className="relative mt-4 flex items-center gap-2">
-          <button onClick={ev => { ev.stopPropagation(); ui.viewDoc(ticket.id); }} className="btn h-11 px-4 bg-white text-[#0f1a2a] text-[14.5px] font-semibold shadow-soft">
+          <button onClick={ev => { ev.stopPropagation(); ui.viewDoc(ticket.id); }} className="tone-icon btn h-11 px-4 rounded-full border border-white/15 text-white text-[14.5px] font-semibold backdrop-blur-sm">
             <Icon name="file" size={17} stroke={2} />{ticketLabel}
           </button>
           {docs.length > 1 && <span className="text-[12.5px] text-white/70">+{docs.length - 1} more in details</span>}
