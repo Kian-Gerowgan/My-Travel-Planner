@@ -1289,7 +1289,7 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
   return (
     <article onClick={open} role="link" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} className="tone-press anim-in min-w-0 overflow-hidden cursor-pointer rounded-[24px] bg-card/90 border border-line p-3.5 sm:p-4 transition hover:border-white/15" style={{ animationDelay: `${idx * 50}ms` }}>
       <div className="flex gap-4">
-        <button onClick={e => { e.stopPropagation(); go(urgent ? `#/trip/${trip.id}/todos` : `#/trip/${trip.id}`); }} aria-label={urgent ? `${trip.name}: ${plural(urgent, 'thing', 'things')} to do now` : `Open ${trip.name}`} className="relative shrink-0 self-start">
+        <button onClick={e => { e.stopPropagation(); open(); }} aria-label={urgent ? `Open ${trip.name} (${plural(urgent, 'thing', 'things')} to do now)` : `Open ${trip.name}`} className="relative shrink-0 self-start">
           <DestinationTile trip={trip} />
           {urgent > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-danger text-white text-[12px] font-bold grid place-items-center border-2 border-card shadow-soft tabular-nums" aria-hidden="true">{urgent}</span>}
         </button>
