@@ -607,7 +607,7 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="tone-ink text-[14px] font-semibold tabular-nums">{v.time}</span>
-          {e.kind === 'main' && <StatusPill s={a.status} />}
+          {e.kind === 'main' && <StatusPill s={a.status} a={a} />}
           <TravellerDots a={a} trip={data.trips.find((t: Trip) => t.id === a.tripId)} />
           {(docCount > 0 || (a.notes.length > 0 && e.kind === 'main')) && (
             <span className="flex items-center gap-2 text-[11.5px] text-ink/55">
@@ -1282,10 +1282,15 @@ function TripCard({ trip, count, idx }: { trip: Trip; count: number; idx: number
   const days = daysBetween(trip.start, trip.end) + 1;
   const open = () => go(`#/trip/${trip.id}`);
   const status = tripStatus(trip);
+  // Red counter only for things to do now (see tripTodos); finished trips stay quiet.
+  const urgent = status === 'completed' || trip.archived ? 0 : tripTodos(trip, data.activities.filter((a: Activity) => a.tripId === trip.id)).count;
   return (
     <article onClick={open} role="link" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(); }} className="tone-press anim-in min-w-0 overflow-hidden cursor-pointer rounded-[24px] bg-card/90 border border-line p-3.5 sm:p-4 transition hover:border-white/15" style={{ animationDelay: `${idx * 50}ms` }}>
       <div className="flex gap-4">
-        <button onClick={open} aria-label={`Open ${trip.name}`}><DestinationTile trip={trip} /></button>
+        <button onClick={e => { e.stopPropagation(); go(urgent ? `#/trip/${trip.id}/todos` : `#/trip/${trip.id}`); }} aria-label={urgent ? `${trip.name}: ${plural(urgent, 'thing', 'things')} to do now` : `Open ${trip.name}`} className="relative shrink-0 self-start">
+          <DestinationTile trip={trip} />
+          {urgent > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-danger text-white text-[12px] font-bold grid place-items-center border-2 border-card shadow-soft tabular-nums" aria-hidden="true">{urgent}</span>}
+        </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <button onClick={open} className="text-left min-w-0 pt-1">
@@ -1515,9 +1520,12 @@ const BOOKING: Record<BookingStatus, { label: string; cls: string }> = {
   pending: { label: 'Pending', cls: 'bg-cognac/20 text-cognac' },
   planned: { label: 'Not booked', cls: 'bg-danger/15 text-danger' },
 };
-/** Small badge on cards; confirmed bookings stay quiet. */
-function StatusPill({ s, always = false }: { s?: BookingStatus; always?: boolean }) {
+/** Things you book (flights, trains, transfers, hotels) – as opposed to meetings and personal plans. */
+const isBooking = (a: Activity) => a.type === 'flight' || a.type === 'train' || a.type === 'transfer' || a.type === 'hotel';
+/** Small badge on cards; confirmed bookings stay quiet. Meetings that aren't fixed yet only get a grey "TBC". */
+function StatusPill({ s, a, always = false }: { s?: BookingStatus; a?: Activity; always?: boolean }) {
   if (!s || (s === 'confirmed' && !always)) return null;
+  if (a && !isBooking(a) && s !== 'confirmed') return <span className="rounded-full px-1.5 py-[0px] text-[10px] font-bold uppercase tracking-wide whitespace-nowrap border border-ink/25 text-ink/60">TBC</span>;
   return <span className={`rounded-full px-1.5 py-[1px] text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${BOOKING[s].cls}`}>{BOOKING[s].label}</span>;
 }
 
@@ -1647,8 +1655,14 @@ function TravellerFilter({ trip, who, onChange }: { trip: Trip; who: string; onC
 type Deadline = { key: string; date: string; a: Activity; kind: 'task' | 'payment'; text: string; t?: Task };
 type Issue = { key: string; icon: string; title: string; text: string; a?: Activity; date?: string };
 
-/** Everything still open for a trip: deadlines, missing nights, schedule problems, unconfirmed bookings, tasks and warnings. */
+/** Everything still open for a trip, sorted by urgency.
+ *  now     – act now: deadlines within 3 days (or overdue), missing nights / schedule problems within 14 days, bookings not made yet
+ *  waiting – bookings waiting for someone else (waitlist, standby, change requested)
+ *  info    – everything else: later deadlines and gaps, meetings whose time isn't fixed yet, tasks without a date
+ *  `count` (the number on the tab and the trip card) only counts "now". */
+const URGENT_DAYS = 3, SOON_DAYS = 14;
 function tripTodos(trip: Trip, acts: Activity[]) {
+  const td = todayStr();
   const ms = (a: Activity) => toUtc(a.start, a.startTz);
   const endMs = (a: Activity) => (a.end ? toUtc(a.end, a.endTz || a.startTz) : ms(a));
   const sorted = [...acts].sort((a, b) => ms(a) - ms(b));
@@ -1698,18 +1712,35 @@ function tripTodos(trip: Trip, acts: Activity[]) {
   });
   deadlines.sort((x, y) => x.date.localeCompare(y.date));
 
-  const unconfirmed = sorted.filter(a => a.status === 'planned' || a.status === 'pending');
-  const tasks = sorted.flatMap(a => a.tasks.filter(t => !t.due || t.done).map(t => ({ a, t })));
+  const within = (d: string | undefined, n: number) => !!d && daysBetween(td, d) <= n;
+  const now = {
+    deadlines: deadlines.filter(d => within(d.date, URGENT_DAYS)),
+    gaps: gaps.filter(g => within(g.from, SOON_DAYS)),
+    issues: issues.filter(i => within(i.date, SOON_DAYS)),
+    notBooked: sorted.filter(a => isBooking(a) && a.status === 'planned'),
+  };
+  const later = {
+    deadlines: deadlines.filter(d => !within(d.date, URGENT_DAYS)),
+    gaps: gaps.filter(g => !within(g.from, SOON_DAYS)),
+    issues: issues.filter(i => !within(i.date, SOON_DAYS)),
+  };
+  const waiting = sorted.filter(a => isBooking(a) && a.status === 'pending');
+  const tbc = sorted.filter(a => !isBooking(a) && (a.status === 'pending' || a.status === 'planned'));
+  // Tasks without their own date become urgent when their stage is coming up within 3 days.
+  const undated = sorted.flatMap(a => a.tasks.filter(t => !t.due || t.done).map(t => ({ a, t })));
+  const soonStage = (a: Activity) => within(a.start.slice(0, 10), URGENT_DAYS) && (a.end || a.start).slice(0, 10) >= td;
+  const nowTasks = undated.filter(x => !x.t.done && soonStage(x.a));
+  const tasks = undated.filter(x => !nowTasks.includes(x));
   const warnings = sorted.flatMap(a => a.notes.filter(n => n.text.trim().startsWith('⚠')).map(n => ({ a, n })));
-  const count = deadlines.length + gaps.length + issues.length + unconfirmed.length + tasks.filter(x => !x.t.done).length;
-  return { deadlines, gaps, issues, unconfirmed, tasks, warnings, count };
+  const count = now.deadlines.length + nowTasks.length + now.gaps.length + now.issues.length + now.notBooked.length;
+  return { now: { ...now, tasks: nowTasks }, later, waiting, tbc, tasks, warnings, deadlines, gaps, issues, count };
 }
 
 function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entries: Entry[] }) {
   const { updateActivity } = useStore();
   const ui = useUI();
   const [showDone, setShowDone] = useState(false);
-  const { deadlines, gaps, issues, unconfirmed, tasks, warnings } = tripTodos(trip, acts);
+  const { now, later, waiting, tbc, tasks, warnings, count } = tripTodos(trip, acts);
   const open = tasks.filter(x => !x.t.done), done = tasks.filter(x => x.t.done);
   // Where you are that night: the destination of the last flight/train that arrived by then, else the day's last city.
   const cityFor = (d: string) => {
@@ -1725,98 +1756,86 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
   const patchTask = (a: Activity, tid: string, p: Partial<Task>) => updateActivity(a.id, (x: Activity) => ({ ...x, tasks: x.tasks.map(t => t.id === tid ? { ...t, ...p } : t) }));
   const toggle = (a: Activity, t: Task) => patchTask(a, t.id, { done: !t.done });
   const markPaid = (a: Activity) => { updateActivity(a.id, (x: Activity) => ({ ...x, cost: x.cost ? { ...x.cost, paidAmount: x.cost.amount } : x.cost })); ui.toast('Marked as paid'); };
-  const Section = ({ title, icon, children }: any) => (
+  const Group = ({ title, sub, tone, children }: { title: string; sub: string; tone: 'now' | 'wait' | 'info'; children: any }) => (
     <section>
-      <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading mb-3 flex items-center gap-2"><Icon name={icon} size={15} />{title}</h3>
+      <div className="mb-3 flex items-baseline gap-2.5">
+        <span className={`h-2.5 w-2.5 rounded-full shrink-0 translate-y-[1px] ${tone === 'now' ? 'bg-danger' : tone === 'wait' ? 'bg-cognac' : 'bg-ink/30'}`} />
+        <h3 className="text-[12px] font-bold uppercase tracking-[0.14em] text-heading">{title}</h3>
+        <span className="text-[12px] text-muted">{sub}</span>
+      </div>
       <div className="space-y-2">{children}</div>
     </section>
   );
+  const Sub = ({ children }: any) => <div className="pt-2 pb-0.5 text-[11.5px] font-bold uppercase tracking-[0.12em] text-muted">{children}</div>;
   const Check = ({ onClick, on }: { onClick: () => void; on?: boolean }) => (
     <button onClick={onClick} aria-label={on ? 'Mark as open' : 'Mark as done'} className={`mt-0.5 h-6 w-6 rounded-lg border-2 grid place-items-center shrink-0 ${on ? 'bg-primary border-primary text-white' : 'border-line hover:border-primary'}`}>{on && <Icon name="check" size={14} stroke={2.5} />}</button>
   );
-  const problems = gaps.length + issues.length + unconfirmed.length;
-  if (!deadlines.length && !problems && !open.length && !warnings.length) {
-    return <div className="max-w-3xl"><Empty icon="check" title="All set" text="No deadlines, no missing hotels, no schedule problems and no open tasks for this trip." /></div>;
+  const box = { now: 'border-danger/45 bg-danger/10', wait: 'border-cognac/40 bg-cognac/10', info: 'border-line bg-card' };
+  const DeadlineRow = ({ d, tone }: { d: Deadline; tone: 'now' | 'info' }) => (
+    <div className={`flex items-start gap-3 rounded-2xl border px-3.5 py-3 ${box[tone]}`}>
+      {d.kind === 'task' ? <Check onClick={() => toggle(d.a, d.t!)} /> : <span className={`mt-0.5 h-6 w-6 grid place-items-center shrink-0 ${tone === 'now' ? 'text-danger' : 'text-muted'}`}><Icon name="wallet" size={18} /></span>}
+      <div className="min-w-0 flex-1">
+        <div className="text-[14.5px] text-ink">{d.text}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {d.kind === 'task' ? <DueChip due={d.date} onChange={v => patchTask(d.a, d.t!.id, { due: v })} /> : <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[11.5px] font-semibold ${dueTone(d.date)}`}><Icon name="calendar" size={12} />{dueLabel(d.date)}</span>}
+          <ActRef a={d.a} />
+        </div>
+      </div>
+      {d.kind === 'payment' && <button onClick={() => markPaid(d.a)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Paid</button>}
+    </div>
+  );
+  const GapRow = ({ g, tone }: { g: { from: string; to: string }; tone: 'now' | 'info' }) => (
+    <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${box[tone]}`}>
+      <Icon name="bed" size={18} className={`shrink-0 ${tone === 'now' ? 'text-danger' : 'text-muted'}`} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[14.5px] font-semibold text-ink">{g.from === g.to ? `Night of ${fmtShort(g.from)}` : `Nights ${fmtShort(g.from)} – ${fmtShort(g.to)}`}{cityFor(g.from) ? ` · ${cityFor(g.from)}` : ''}</div>
+        <div className="text-[12.5px] text-muted">{plural(daysBetween(g.from, g.to) + 1, 'night', 'nights')} without a hotel</div>
+      </div>
+      <button onClick={() => ui.newActivity(trip.id, g.from)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add hotel</button>
+    </div>
+  );
+  const IssueRow = ({ i, tone }: { i: Issue; tone: 'now' | 'info' }) => (
+    <div className={`flex items-start gap-3 rounded-2xl border px-4 py-3 ${box[tone]}`}>
+      <Icon name={i.icon} size={18} className={`shrink-0 mt-0.5 ${tone === 'now' ? 'text-danger' : 'text-muted'}`} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[14.5px] font-semibold text-ink">{i.title}</div>
+        <div className="text-[13px] text-ink/80 leading-snug">{i.text}</div>
+        {i.a && <div className="mt-1"><ActRef a={i.a} /></div>}
+      </div>
+      {!i.a && i.date && <button onClick={() => ui.newActivity(trip.id, i.date)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add</button>}
+    </div>
+  );
+  const BookingRow = ({ a, tone }: { a: Activity; tone: 'now' | 'wait' | 'info' }) => (
+    <button onClick={() => ui.openActivity(a.id)} className={`w-full flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left ${box[tone]}`}>
+      <span className={`tone-${toneOf(a.type)} tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0`}><Icon name={TYPE_META[a.type].icon} size={16} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14.5px] font-semibold text-ink">{a.title}</span>
+        <span className="block text-[12.5px] text-muted">{fmtShort(a.start.slice(0, 10))} · {a.start.slice(11, 16)}</span>
+      </span>
+      <StatusPill s={a.status as BookingStatus} a={a} />
+    </button>
+  );
+
+  const nNow = count, nWait = waiting.length;
+  const hasInfo = later.deadlines.length + later.gaps.length + later.issues.length + tbc.length + open.length + done.length + warnings.length > 0;
+  if (!nNow && !nWait && !hasInfo) {
+    return <div className="max-w-3xl"><Empty icon="check" title="All set" text="Nothing to do for this trip right now." /></div>;
   }
   return (
-    <div className="max-w-3xl space-y-8">
-      <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${problems ? 'border-cognac/40 bg-cognac/10' : 'border-dot/40 bg-dot/10'}`}>
-        <Icon name={problems ? 'alert' : 'check'} size={20} className={problems ? 'text-cognac' : 'text-dot'} />
+    <div className="max-w-3xl space-y-9">
+      <div className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${nNow ? 'border-danger/45 bg-danger/10' : 'border-dot/40 bg-dot/10'}`}>
+        <Icon name={nNow ? 'alert' : 'check'} size={20} className={nNow ? 'text-danger' : 'text-dot'} />
         <div className="text-[14px] text-ink">
-          <span className="font-semibold">Trip check:</span>{' '}
-          {problems ? [gaps.length && plural(gaps.length, 'gap in accommodation', 'gaps in accommodation'), issues.length && plural(issues.length, 'schedule issue', 'schedule issues'), unconfirmed.length && `${unconfirmed.length} not confirmed`].filter(Boolean).join(' · ') : 'no gaps or conflicts found'}
-          {deadlines.length > 0 && <span className="text-muted"> · {plural(deadlines.length, 'deadline', 'deadlines')}</span>}
+          <span className="font-semibold">{nNow ? `${plural(nNow, 'thing', 'things')} to do now` : 'Nothing urgent'}</span>
+          <span className="text-muted">{nWait ? ` · ${nWait} waiting for confirmation` : ''}{hasInfo ? ' · the rest is for your info' : ''}</span>
         </div>
       </div>
 
-      {deadlines.length > 0 && (
-        <Section title="Deadlines" icon="flag">
-          {deadlines.map(d => (
-            <div key={d.key} className={`flex items-start gap-3 rounded-2xl border px-3.5 py-3 ${daysBetween(todayStr(), d.date) < 0 ? 'border-danger/40 bg-danger/10' : 'bg-card border-line'}`}>
-              {d.kind === 'task' ? <Check onClick={() => toggle(d.a, d.t!)} /> : <span className="mt-0.5 h-6 w-6 grid place-items-center text-cognac shrink-0"><Icon name="wallet" size={18} /></span>}
-              <div className="min-w-0 flex-1">
-                <div className="text-[14.5px] text-ink">{d.text}</div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  {d.kind === 'task' ? <DueChip due={d.date} onChange={v => patchTask(d.a, d.t!.id, { due: v })} /> : <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[11.5px] font-semibold ${dueTone(d.date)}`}><Icon name="calendar" size={12} />{dueLabel(d.date)}</span>}
-                  <ActRef a={d.a} />
-                </div>
-              </div>
-              {d.kind === 'payment' && <button onClick={() => markPaid(d.a)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Paid</button>}
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {gaps.length > 0 && (
-        <Section title="No accommodation" icon="bed">
-          {gaps.map(g => (
-            <div key={g.from} className="flex items-center gap-3 rounded-2xl border border-danger/40 bg-danger/10 px-4 py-3">
-              <Icon name="bed" size={18} className="text-danger shrink-0" />
-              <div className="min-w-0 flex-1">
-                <div className="text-[14.5px] font-semibold text-ink">{g.from === g.to ? `Night of ${fmtShort(g.from)}` : `Nights ${fmtShort(g.from)} – ${fmtShort(g.to)}`}{cityFor(g.from) ? ` · ${cityFor(g.from)}` : ''}</div>
-                <div className="text-[12.5px] text-muted">{plural(daysBetween(g.from, g.to) + 1, 'night', 'nights')} without a hotel</div>
-              </div>
-              <button onClick={() => ui.newActivity(trip.id, g.from)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add hotel</button>
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {issues.length > 0 && (
-        <Section title="Schedule" icon="alert">
-          {issues.map(i => (
-            <div key={i.key} className="flex items-start gap-3 rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
-              <Icon name={i.icon} size={18} className="text-cognac shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="text-[14.5px] font-semibold text-ink">{i.title}</div>
-                <div className="text-[13px] text-ink/80 leading-snug">{i.text}</div>
-                {i.a && <div className="mt-1"><ActRef a={i.a} /></div>}
-              </div>
-              {!i.a && i.date && <button onClick={() => ui.newActivity(trip.id, i.date)} className="text-[13px] font-semibold text-petrol hover:underline shrink-0">Add</button>}
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {unconfirmed.length > 0 && (
-        <Section title="Not confirmed yet" icon="clock">
-          {unconfirmed.map(a => (
-            <button key={a.id} onClick={() => ui.openActivity(a.id)} className={`tone-${toneOf(a.type)} tone-card w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left`}>
-              <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0"><Icon name={TYPE_META[a.type].icon} size={16} /></span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14.5px] font-semibold text-ink">{a.title}</span>
-                <span className="block text-[12.5px] tone-ink">{fmtShort(a.start.slice(0, 10))} · {a.start.slice(11, 16)}</span>
-              </span>
-              <StatusPill s={a.status as BookingStatus} />
-            </button>
-          ))}
-        </Section>
-      )}
-
-      {(open.length > 0 || done.length > 0) && (
-        <Section title={`Tasks · ${open.length} open`} icon="check">
-          {open.map(({ a, t }) => (
-            <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card border border-line px-3.5 py-3">
+      {nNow > 0 && (
+        <Group title="Do now" sub="due within 3 days or needed soon" tone="now">
+          {now.deadlines.map(d => <DeadlineRow key={d.key} d={d} tone="now" />)}
+          {now.tasks.map(({ a, t }) => (
+            <div key={t.id} className={`flex items-start gap-3 rounded-2xl border px-3.5 py-3 ${box.now}`}>
               <Check onClick={() => toggle(a, t)} />
               <div className="min-w-0 flex-1">
                 <div className="text-[14.5px] text-ink">{t.text}</div>
@@ -1824,25 +1843,64 @@ function TripTodos({ trip, acts, entries }: { trip: Trip; acts: Activity[]; entr
               </div>
             </div>
           ))}
-          {done.length > 0 && <button onClick={() => setShowDone(s => !s)} className="text-[13px] text-muted hover:text-ink px-1">{showDone ? 'Hide' : 'Show'} {plural(done.length, 'completed task', 'completed tasks')}</button>}
-          {showDone && done.map(({ a, t }) => (
-            <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card/60 border border-line px-3.5 py-3 opacity-70">
-              <Check onClick={() => toggle(a, t)} on />
-              <div className="min-w-0"><div className="text-[14.5px] text-muted line-through">{t.text}</div><ActRef a={a} /></div>
-            </div>
-          ))}
-        </Section>
+          {now.gaps.map(g => <GapRow key={g.from} g={g} tone="now" />)}
+          {now.issues.map(i => <IssueRow key={i.key} i={i} tone="now" />)}
+          {now.notBooked.map(a => <BookingRow key={a.id} a={a} tone="now" />)}
+        </Group>
       )}
 
-      {warnings.length > 0 && (
-        <Section title="Watch out" icon="note">
-          {warnings.map(({ a, n }) => (
-            <div key={n.id} className="rounded-2xl border border-cognac/40 bg-cognac/10 px-4 py-3">
-              <div className="text-[14px] text-ink leading-relaxed">{n.text}</div>
-              <div className="mt-1"><ActRef a={a} /></div>
+      {nWait > 0 && (
+        <Group title="Waiting for confirmation" sub="nothing to do – keep an eye on it" tone="wait">
+          {waiting.map(a => <BookingRow key={a.id} a={a} tone="wait" />)}
+        </Group>
+      )}
+
+      {hasInfo && (
+        <Group title="For your info" sub="later or without a fixed date" tone="info">
+          {later.deadlines.length > 0 && <><Sub>Coming up</Sub>{later.deadlines.map(d => <DeadlineRow key={d.key} d={d} tone="info" />)}</>}
+          {later.gaps.length > 0 && <><Sub>Accommodation still open</Sub>{later.gaps.map(g => <GapRow key={g.from} g={g} tone="info" />)}</>}
+          {later.issues.length > 0 && <><Sub>Schedule</Sub>{later.issues.map(i => <IssueRow key={i.key} i={i} tone="info" />)}</>}
+          {(open.length > 0 || done.length > 0) && <>
+            <Sub>Tasks · {open.length} open</Sub>
+            {open.map(({ a, t }) => (
+              <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card border border-line px-3.5 py-3">
+                <Check onClick={() => toggle(a, t)} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14.5px] text-ink">{t.text}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><DueChip due={t.due} onChange={v => patchTask(a, t.id, { due: v })} /><ActRef a={a} /></div>
+                </div>
+              </div>
+            ))}
+            {done.length > 0 && <button onClick={() => setShowDone(s => !s)} className="text-[13px] text-muted hover:text-ink px-1">{showDone ? 'Hide' : 'Show'} {plural(done.length, 'completed task', 'completed tasks')}</button>}
+            {showDone && done.map(({ a, t }) => (
+              <div key={t.id} className="flex items-start gap-3 rounded-2xl bg-card/60 border border-line px-3.5 py-3 opacity-70">
+                <Check onClick={() => toggle(a, t)} on />
+                <div className="min-w-0"><div className="text-[14.5px] text-muted line-through">{t.text}</div><ActRef a={a} /></div>
+              </div>
+            ))}
+          </>}
+          {tbc.length > 0 && <>
+            <Sub>Time to be confirmed</Sub>
+            <div className="rounded-2xl bg-card border border-line divide-y divide-line">
+              {tbc.map(a => (
+                <button key={a.id} onClick={() => ui.openActivity(a.id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-white/[0.03]">
+                  <span className={`tone-${toneOf(a.type)} tone-ink shrink-0`}><Icon name={TYPE_META[a.type].icon} size={15} /></span>
+                  <span className="min-w-0 flex-1 text-[14px] text-ink truncate">{a.title}</span>
+                  <span className="text-[12.5px] text-muted shrink-0 tabular-nums">{fmtShort(a.start.slice(0, 10))}</span>
+                </button>
+              ))}
             </div>
-          ))}
-        </Section>
+          </>}
+          {warnings.length > 0 && <>
+            <Sub>Notes to keep in mind</Sub>
+            {warnings.map(({ a, n }) => (
+              <div key={n.id} className="rounded-2xl border border-line bg-card px-4 py-3">
+                <div className="text-[14px] text-ink leading-relaxed">{n.text}</div>
+                <div className="mt-1"><ActRef a={a} /></div>
+              </div>
+            ))}
+          </>}
+        </Group>
       )}
     </div>
   );
@@ -2559,7 +2617,7 @@ function ActivityDetail({ id, onClose }: { id: string; onClose: () => void }) {
         <div className="mt-1.5 text-[14.5px] font-semibold text-cognac">{when}</div>
         {(a.status || taxiTarget(a)) && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <StatusPill s={a.status} always />
+            <StatusPill s={a.status} a={a} always />
             {taxiTarget(a) && <button onClick={() => ui.taxi(a.id)} className="btn h-9 px-3.5 text-[13px] bg-cognac text-[#1a1009]"><Icon name="car" size={15} />Show to driver</button>}
           </div>
         )}
