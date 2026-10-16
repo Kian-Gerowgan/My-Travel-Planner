@@ -598,30 +598,32 @@ function EntryCard({ e, highlight, showTrip }: { e: Entry; highlight?: boolean; 
   const { data } = useStore();
   const v = compactView(e, data.contacts);
   const a = e.a;
-  const docCount = e.kind === 'main' ? data.documents.filter((x: Doc) => x.activityIds.includes(a.id) && !x.cover).length : 0;
+  const docs: Doc[] = data.documents.filter((x: Doc) => x.activityIds.includes(a.id) && !x.cover);
   const sub = [showTrip, v.sub].filter(Boolean).join(' · ');
+  const open = () => ui.openActivity(a.id);
+  // Paperclip in the top-right corner: grey = no document, blue = tap to open it (several → stage details).
+  const openDoc = (ev: React.MouseEvent) => { ev.stopPropagation(); if (docs.length === 1) ui.viewDoc(docs[0].id); else open(); };
   return (
-    <button onClick={() => ui.openActivity(a.id)}
-      className={`tone-press w-full flex items-start gap-3 rounded-[18px] p-3 text-left tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
+    <div role="button" tabIndex={0} onClick={open} onKeyDown={k => { if (k.key === 'Enter') open(); }}
+      className={`tone-press w-full flex items-start gap-3 rounded-[18px] p-3 text-left cursor-pointer tone-${toneOf(a.type)} ${highlight ? 'tone-card-strong' : 'tone-card'} ${e.kind !== 'main' && !highlight ? 'opacity-85' : ''}`}>
       <span className="tone-icon h-9 w-9 rounded-full grid place-items-center shrink-0 mt-0.5"><Icon name={v.icon} size={17} /></span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="tone-ink text-[14px] font-semibold tabular-nums">{v.time}</span>
           {e.kind === 'main' && <StatusPill s={a.status} a={a} />}
           <TravellerDots a={a} trip={data.trips.find((t: Trip) => t.id === a.tripId)} />
-          {(docCount > 0 || (a.notes.length > 0 && e.kind === 'main')) && (
-            <span className="flex items-center gap-2 text-[11.5px] text-ink/55">
-              {docCount > 0 && <span className="flex items-center gap-0.5" title="Documents"><Icon name="clip" size={12} />{docCount}</span>}
-              {a.notes.length > 0 && e.kind === 'main' && <span className="flex items-center gap-0.5" title="Notes"><Icon name="note" size={12} />{a.notes.length}</span>}
-            </span>
-          )}
+          {a.notes.length > 0 && e.kind === 'main' && <span className="flex items-center gap-0.5 text-[11.5px] text-ink/55" title="Notes"><Icon name="note" size={12} />{a.notes.length}</span>}
           {v.badge && <span className="ml-auto text-[12.5px] font-medium text-ink/85 tabular-nums shrink-0">{v.badge}</span>}
+          {docs.length > 0
+            ? <button onClick={openDoc} aria-label={docs.length === 1 ? `Open ${docs[0].name}` : `${docs.length} documents`} title={docs.length === 1 ? docs[0].name : `${docs.length} documents`}
+                className={`${v.badge ? '' : 'ml-auto'} -my-2 -mr-1.5 h-9 w-9 shrink-0 grid place-items-center rounded-full text-petrol hover:bg-petrol/15 active:bg-petrol/25`}><Icon name="clip" size={16} stroke={2} /></button>
+            : <span className={`${v.badge ? '' : 'ml-auto'} -mr-1.5 h-9 w-9 -my-2 shrink-0 grid place-items-center text-ink/20`} aria-hidden="true"><Icon name="clip" size={16} /></span>}
         </span>
         <span className="block text-[15px] font-medium leading-snug text-ink mt-0.5">{v.title}</span>
         {sub && <span className="block text-[12.5px] leading-snug tone-ink opacity-90 mt-0.5">{sub}</span>}
       </span>
       <Icon name="right" size={16} className="text-ink/50 shrink-0 self-center" />
-    </button>
+    </div>
   );
 }
 
