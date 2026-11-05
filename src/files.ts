@@ -41,7 +41,8 @@ export function useFileSync(docs: FileDoc[], trips: FileTrip[], sync: SyncInfo, 
     try {
       // 1. Deleted documents → Drive trash
       for (const driveId of readTrash()) {
-        try { await drive.trashFile(driveId); } catch (e: any) { if (!/ 404/.test(e.message)) throw e; }
+        // 404: already gone · 403: not created by the app (read-only access), so it stays in Drive
+        try { await drive.trashFile(driveId); } catch (e: any) { if (!/ 40[34]/.test(e.message)) throw e; }
         writeTrash(readTrash().filter(x => x !== driveId));
       }
       const have = new Set(await idb.listFileIds());

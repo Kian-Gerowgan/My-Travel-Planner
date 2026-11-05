@@ -1,9 +1,10 @@
 // Thin Google Drive client for the browser: sign-in via Google Identity Services,
-// file operations via the Drive v3 REST API. Uses the narrow `drive.file` scope,
-// so the app can only see files and folders it created itself.
+// file operations via the Drive v3 REST API. The app writes only files it created itself
+// (`drive.file`) and may read any Drive file (`drive.readonly`), so documents placed in
+// the trip folders from another device or the Drive desktop app open too.
 
 export const GOOGLE_CLIENT_ID = '667767558184-ulqiff1cnhnrhb2ib8vhhrclgm3tjr16.apps.googleusercontent.com';
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -33,9 +34,10 @@ export function loadGoogleSignIn() {
   return gisPromise;
 }
 
-type Token = { token: string; exp: number };
+type Token = { token: string; exp: number; scope?: string };
+// A token granted for an older, narrower scope is dropped, so the next sign-in asks for the current one.
 let token: Token | null = (() => {
-  try { const t = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null'); return t && t.exp > Date.now() ? t : null; } catch { return null; }
+  try { const t = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null'); return t && t.exp > Date.now() && t.scope === SCOPE ? t : null; } catch { return null; }
 })();
 
 export const hasValidToken = () => !!token && token.exp > Date.now() + 60_000;
@@ -55,7 +57,7 @@ export async function signIn(firstTime: boolean): Promise<void> {
       scope: SCOPE,
       callback: (r: any) => {
         if (r.error) { reject(new Error(r.error_description || r.error)); return; }
-        token = { token: r.access_token, exp: Date.now() + (Number(r.expires_in) || 3600) * 1000 };
+        token = { token: r.access_token, exp: Date.now() + (Number(r.expires_in) || 3600) * 1000, scope: SCOPE };
         try { localStorage.setItem(TOKEN_KEY, JSON.stringify(token)); } catch { /* storage unavailable */ }
         resolve();
       },
@@ -88,8 +90,11 @@ async function findOne(query: string): Promise<DriveFile | null> {
   return j.files?.[0] || null;
 }
 
+/** Finds a folder the app can add files to (read-only access also shows folders it cannot write into), or creates one. */
 export async function ensureFolder(name: string, parentId?: string): Promise<string> {
-  const found = await findOne(`name='${esc(name)}' and mimeType='${FOLDER_MIME}'` + (parentId ? ` and '${parentId}' in parents` : ''));
+  const q = `name='${esc(name)}' and mimeType='${FOLDER_MIME}' and trashed=false` + (parentId ? ` and '${parentId}' in parents` : '');
+  const j = await (await call(`${API}/files?q=${encodeURIComponent(q)}&fields=files(id,capabilities/canAddChildren)&orderBy=createdTime&pageSize=20&spaces=drive`)).json();
+  const found = (j.files || []).find((f: any) => f.capabilities?.canAddChildren);
   if (found) return found.id;
   const r = await call(`${API}/files?fields=id`, json({ name, mimeType: FOLDER_MIME, parents: parentId ? [parentId] : undefined }));
   return (await r.json()).id;
