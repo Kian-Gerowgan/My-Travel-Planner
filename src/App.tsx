@@ -3,6 +3,8 @@ import { useDriveSync } from './sync';
 import { useFileSync } from './files';
 import { renderPdf } from './pdf';
 import { useUpdateCheck } from './updates';
+import * as assistant from './assistant';
+import * as gmail from './gmail';
 
 /* =========================================================================
    TYPES
@@ -297,6 +299,9 @@ function sampleData(): Data {
    ICONS (Lucide-style, inline)
    ========================================================================= */
 const ICONS: Record<string, string> = {
+  sparkles: '<path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
+  mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/>',
+  send: '<path d="M14.54 21.69a.5.5 0 0 0 .94-.03l6.5-19a.5.5 0 0 0-.64-.64l-19 6.5a.5.5 0 0 0-.03.94l7.93 3.18a2 2 0 0 1 1.11 1.11z"/><path d="m21.85 2.15-10.94 10.93"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
   landing: '<path d="M2 22h20"/><path d="M3.77 10.77 2 9l2-4.5 1.1.55c.55.28.9.84.9 1.45s.35 1.17.9 1.45L8 8.5l3-6 1.05.53a2 2 0 0 1 1.09 1.52l.72 5.4a2 2 0 0 0 1.09 1.52l4.4 2.2c.42.22.78.55 1.01.96l.6 1.03c.49.88-.06 1.98-1.06 2.1l-1.18.15c-.47.06-.95-.02-1.37-.24L4.29 11.15a2 2 0 0 1-.52-.38Z"/>',
   train: '<path d="M8 3.1V7a4 4 0 0 0 8 0V3.1"/><path d="m9 15-1-1"/><path d="m15 15 1-1"/><path d="M9 19c-2.8 0-5-2.2-5-5v-4a8 8 0 0 1 16 0v4c0 2.8-2.2 5-5 5Z"/><path d="m8 19-2 3"/><path d="m16 22-2-3"/>',
@@ -457,6 +462,7 @@ function parseRoute(h: string) {
   if (p[0] === 'calendar') return { page: 'calendar' };
   if (p[0] === 'contacts') return { page: 'contacts' };
   if (p[0] === 'settings') return { page: 'settings' };
+  if (p[0] === 'assistant') return { page: 'assistant' };
   return { page: 'trips' };
 }
 function useRoute() {
@@ -2518,6 +2524,34 @@ function SyncPrompts() {
   );
 }
 
+function AssistantSettings({ Card }: { Card: any }) {
+  const ui = useUI();
+  const [key, setKey] = useState(assistant.getApiKey());
+  const [draft, setDraft] = useState('');
+  const [gm, setGm] = useState(gmail.hasGmailToken());
+  return (
+    <Card title="Assistant (Claude)" icon="sparkles">
+      <p className="text-[14px] text-muted">Your Claude API key is stored only on this device. Gmail is read only; the assistant proposes changes and you apply them.</p>
+      {key ? (
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <span className="text-[14px] text-ink font-semibold">API key ···{key.slice(-4)}</span>
+          <button className="btn btn-ghost" onClick={() => { assistant.setApiKey(''); setKey(''); ui.toast('API key removed'); }}>Remove key</button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2 mt-3">
+          <input className="inp flex-1 min-w-[220px]" type="password" autoComplete="off" placeholder="sk-ant-…" value={draft} onChange={e => setDraft(e.target.value)} />
+          <button className="btn btn-primary" disabled={!draft.trim().startsWith('sk-')} onClick={() => { assistant.setApiKey(draft); setKey(draft.trim()); setDraft(''); ui.toast('API key saved'); }}>Save</button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        <span className="text-[14px] text-muted">Gmail: {gm ? 'connected' : 'not connected'}</span>
+        {gm ? <button className="btn btn-ghost" onClick={() => { gmail.disconnectGmail(); setGm(false); }}>Disconnect Gmail</button>
+          : <button className="btn btn-ghost" onClick={() => gmail.connectGmail().then(() => setGm(true)).catch(e => ui.toast(e.message))}><Icon name="mail" size={16} />Connect Gmail</button>}
+      </div>
+    </Card>
+  );
+}
+
 function SettingsPage({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
   const { data, reset, sync } = useStore();
   const ui = useUI();
@@ -2569,6 +2603,7 @@ function SettingsPage({ theme, setTheme }: { theme: string; setTheme: (t: string
             </div>
           )}
         </Card>
+        <AssistantSettings Card={Card} />
         <Card title="Data" icon="archive">
           <div className="text-[14px] text-muted mb-4">{plural(data.trips.length, 'trip', 'trips')} · {plural(data.activities.length, 'activity', 'activities')} · {plural(data.contacts.length, 'contact', 'contacts')}</div>
           <div className="flex flex-wrap gap-2">
@@ -3131,9 +3166,249 @@ function ConfirmDialog({ state, onClose }: { state: any; onClose: () => void }) 
 /* =========================================================================
    SHELL
    ========================================================================= */
+/* =========================================================================
+   ASSISTANT (Claude) – chat, proposals, applying changes
+   ========================================================================= */
+const ACT_TYPES: ActivityType[] = ['flight', 'train', 'hotel', 'meeting', 'transfer', 'personal'];
+const LOCAL_DT = /^\d{4}-\d\d-\d\dT\d\d:\d\d$/;
+const DAY = /^\d{4}-\d\d-\d\d$/;
+
+const normNotes = (l: any[]): Note[] => (Array.isArray(l) ? l : []).filter(n => n && (n.text || typeof n === 'string')).map(n => typeof n === 'string' ? { id: uid(), text: n, createdAt: nowLocal() } : { id: n.id || uid(), text: String(n.text), createdAt: n.createdAt || nowLocal() });
+const normTasks = (l: any[]): Task[] => (Array.isArray(l) ? l : []).filter(t => t && (t.text || typeof t === 'string')).map(t => typeof t === 'string' ? { id: uid(), text: t, done: false } : { id: t.id || uid(), text: String(t.text), done: !!t.done, ...(t.due && DAY.test(t.due) ? { due: t.due } : {}) });
+const strMap = (o: any) => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : {}).map(([k, v]) => [k, v == null ? '' : String(v)]));
+
+/** Works out the new data for a proposal without touching the store. Throws with a readable message when something doesn't fit. */
+function planProposal(ops: assistant.Op[], data: Data) {
+  const d: Data = clone(data);
+  const dead = data.deleted || {};
+  const ids = new Set([...d.trips, ...d.activities, ...d.contacts, ...d.documents].map(x => x.id));
+  const map: Record<string, string> = {};
+  const freshId = (want?: string) => { const id = want && !ids.has(want) && !dead[want] && /^[\w-]{2,40}$/.test(want) ? want : uid(); ids.add(id); if (want && want !== id) map[want] = id; return id; };
+  const m = (id: string) => map[id] || id;
+  const after: { deleteTrips: string[]; deleteDocs: string[]; attach: Extract<assistant.Op, { op: 'attach_email_file' }>[] } = { deleteTrips: [], deleteDocs: [], attach: [] };
+
+  for (const op of ops) {
+    if (op.op === 'upsert_trip') {
+      const t = op.trip || {};
+      const ex = d.trips.find(x => x.id === t.id);
+      if (ex) { Object.assign(ex, { ...t, id: ex.id }); continue; }
+      if (!t.name || !DAY.test(t.start || '') || !DAY.test(t.end || '')) throw new Error(`New trip needs a name and start/end dates (got ${JSON.stringify({ name: t.name, start: t.start, end: t.end })}).`);
+      d.trips.push({ kind: 'private', countries: [], cities: [], archived: false, ...t, id: freshId(t.id) });
+    } else if (op.op === 'upsert_activity') {
+      const a = op.activity || {};
+      const ex = d.activities.find(x => x.id === a.id);
+      const contactIds = Array.isArray(a.contactIds) ? a.contactIds.map(m) : undefined;
+      if (ex) {
+        Object.assign(ex, { ...a, id: ex.id, tripId: a.tripId ? m(a.tripId) : ex.tripId,
+          details: { ...ex.details, ...strMap(a.details) },
+          notes: a.notes ? normNotes(a.notes) : ex.notes, tasks: a.tasks ? normTasks(a.tasks) : ex.tasks,
+          contactIds: contactIds || ex.contactIds });
+        if (!d.trips.some(t => t.id === ex.tripId)) throw new Error(`“${ex.title}” points to a trip that doesn’t exist (${ex.tripId}).`);
+        continue;
+      }
+      const tripId = m(a.tripId || '');
+      if (!d.trips.some(t => t.id === tripId)) throw new Error(`New entry “${a.title || a.type}” needs an existing trip (got “${a.tripId}”).`);
+      if (!ACT_TYPES.includes(a.type)) throw new Error(`Unknown entry type “${a.type}”.`);
+      if (!LOCAL_DT.test(a.start || '') || !a.startTz) throw new Error(`“${a.title || a.type}” needs a start time (YYYY-MM-DDTHH:mm) and time zone.`);
+      if (a.end && !LOCAL_DT.test(a.end)) throw new Error(`“${a.title}” has an invalid end time (${a.end}).`);
+      d.activities.push({ city: '', location: '', ...a, id: freshId(a.id), tripId, title: a.title || '', details: strMap(a.details),
+        contactIds: contactIds || [], notes: normNotes(a.notes), tasks: normTasks(a.tasks), ...(a.end ? { endTz: a.endTz || a.startTz } : {}) });
+    } else if (op.op === 'upsert_contact') {
+      const c = op.contact || {};
+      const ex = d.contacts.find(x => x.id === c.id);
+      if (ex) { Object.assign(ex, { ...strMap(c), id: ex.id }); continue; }
+      if (!c.name) throw new Error('New contact needs a name.');
+      d.contacts.push({ company: '', position: '', phone: '', email: '', country: '', city: '', notes: '', ...strMap(c), id: freshId(c.id), name: String(c.name) });
+    } else if (op.op === 'delete') {
+      if (op.kind === 'activity') {
+        if (!d.activities.some(a => a.id === op.id)) throw new Error(`Entry to delete not found (${op.id}).`);
+        d.activities = d.activities.filter(a => a.id !== op.id);
+        d.documents = d.documents.map(x => ({ ...x, activityIds: x.activityIds.filter(y => y !== op.id) }));
+      } else if (op.kind === 'contact') {
+        d.contacts = d.contacts.filter(c => c.id !== op.id);
+        d.activities = d.activities.map(a => ({ ...a, contactIds: a.contactIds.filter(x => x !== op.id) }));
+      } else if (op.kind === 'trip') {
+        if (!d.trips.some(t => t.id === op.id)) throw new Error(`Trip to delete not found (${op.id}).`);
+        after.deleteTrips.push(op.id);
+      } else if (op.kind === 'document') after.deleteDocs.push(op.id);
+    } else if (op.op === 'attach_email_file') {
+      if (!op.messageId || !op.filename) throw new Error('Attachment is missing the e-mail or file name.');
+      after.attach.push(op);
+    }
+  }
+  after.attach = after.attach.map(op => ({ ...op, tripId: m(op.tripId), activityIds: (op.activityIds || []).map(m) }));
+  after.attach.forEach(op => { if (!d.trips.some(t => t.id === op.tripId)) throw new Error(`Attachment ${op.filename}: trip “${op.tripId}” not found.`); });
+  return { data: d, after };
+}
+
+function opLines(op: assistant.Op, data: Data): { icon: string; title: string; sub?: string } {
+  const when = (a: any) => a.start ? `${fmtWhen(a.start)}${a.end ? ' → ' + fmtWhen(a.end) : ''}` : '';
+  if (op.op === 'upsert_trip') {
+    const ex = data.trips.find(t => t.id === op.trip?.id);
+    return ex ? { icon: 'pencil', title: `Update trip: ${ex.name}`, sub: Object.keys(op.trip).filter(k => k !== 'id').join(', ') }
+      : { icon: 'plus', title: `New trip: ${op.trip?.name}`, sub: [op.trip?.start, op.trip?.end].filter(Boolean).join(' – ') };
+  }
+  if (op.op === 'upsert_activity') {
+    const a = op.activity || {};
+    const ex = data.activities.find(x => x.id === a.id);
+    const info = [when(a), ...Object.values(strMap(a.details)).filter(Boolean), a.status].filter(Boolean).join(' · ');
+    return ex ? { icon: 'pencil', title: `Update: ${ex.title || autoTitle(ex)}`, sub: info || Object.keys(a).filter(k => k !== 'id').join(', ') }
+      : { icon: 'plus', title: `New ${a.type || 'entry'}: ${a.title || ''}`, sub: info };
+  }
+  if (op.op === 'upsert_contact') {
+    const ex = data.contacts.find(c => c.id === op.contact?.id);
+    return { icon: ex ? 'pencil' : 'plus', title: `${ex ? 'Update' : 'New'} contact: ${op.contact?.name || ex?.name}`, sub: [op.contact?.company, op.contact?.phone].filter(Boolean).join(' · ') };
+  }
+  if (op.op === 'delete') {
+    const name = op.kind === 'trip' ? data.trips.find(t => t.id === op.id)?.name : op.kind === 'activity' ? data.activities.find(a => a.id === op.id)?.title : op.kind === 'contact' ? data.contacts.find(c => c.id === op.id)?.name : data.documents.find(x => x.id === op.id)?.name;
+    return { icon: 'trash', title: `Delete ${op.kind}: ${name || op.id}` };
+  }
+  return { icon: 'clip', title: `Attach document: ${op.name || op.filename}` };
+}
+const fmtWhen = (s: string) => { const [d, t] = s.split('T'); const dt = new Date(d + 'T00:00:00'); return `${dt.getDate()} ${dt.toLocaleString(LOCALE, { month: 'short' })}${t ? ' ' + t : ''}`; };
+
+function ProposalCard({ p }: { p: assistant.Proposal }) {
+  const store = useStore();
+  const ui = useUI();
+  const [busy, setBusy] = useState(false);
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const { data: next, after } = planProposal(p.ops, store.data);
+      // Fetch attachments first, so a failing download doesn't leave half a change behind.
+      const files: { op: any; file: File }[] = [];
+      for (const op of after.attach) {
+        const a = await gmail.getAttachment(op.messageId, op.filename);
+        files.push({ op, file: new File([gmail.base64ToBlob(a.b64, a.mime)], op.name || a.filename, { type: a.mime }) });
+      }
+      store.edit(() => next);
+      after.deleteDocs.forEach((id: string) => store.deleteDoc(id));
+      after.deleteTrips.forEach((id: string) => store.deleteTrip(id));
+      for (const { op, file } of files) await store.addDocuments(op.tripId, [file], op.activityIds);
+      assistant.chatStore.decide(p.id, 'applied');
+      ui.toast('Changes applied');
+    } catch (e: any) {
+      assistant.chatStore.decide(p.id, 'failed', e?.message || String(e));
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-2xl bg-card border border-line shadow-soft p-4 max-w-xl">
+      <div className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted"><Icon name="sparkles" size={14} />Proposed changes</div>
+      <div className="mt-1.5 font-semibold text-ink">{p.summary}</div>
+      <ul className="mt-3 space-y-2">
+        {p.ops.map((op, i) => { const l = opLines(op, store.data); return (
+          <li key={i} className="flex gap-2.5 text-[14px]">
+            <Icon name={l.icon} size={15} className="mt-0.5 text-muted" />
+            <span className="min-w-0"><span className="block text-ink break-words">{l.title}</span>{l.sub && <span className="block text-[12.5px] text-muted break-words">{l.sub}</span>}</span>
+          </li>); })}
+      </ul>
+      {p.status === 'pending' ? (
+        <div className="flex gap-2 mt-4">
+          <button className="btn btn-primary" disabled={busy} onClick={apply}><Icon name={busy ? 'refresh' : 'check'} size={16} className={busy ? 'animate-spin' : ''} />Apply</button>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => assistant.chatStore.decide(p.id, 'discarded')}>Discard</button>
+        </div>
+      ) : (
+        <div className={`mt-3 text-[13px] font-semibold ${p.status === 'failed' ? 'text-danger' : 'text-muted'}`}>
+          {p.status === 'applied' ? '✓ Applied' : p.status === 'discarded' ? 'Discarded' : `Couldn’t apply: ${p.error}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useSpeech(onText: (t: string) => void) {
+  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const [on, setOn] = useState(false);
+  const rec = useRef<any>(null);
+  const toggle = () => {
+    if (on) { rec.current?.stop(); return; }
+    const r = new SR();
+    r.lang = navigator.language?.startsWith('en') ? 'en-GB' : 'de-DE';
+    r.interimResults = true; r.continuous = false;
+    r.onresult = (e: any) => onText(Array.from(e.results).map((x: any) => x[0].transcript).join(''));
+    r.onend = () => setOn(false); r.onerror = () => setOn(false);
+    rec.current = r; setOn(true); r.start();
+  };
+  return { supported: !!SR, on, toggle };
+}
+
+function AssistantPage() {
+  const store = useStore();
+  const chat = React.useSyncExternalStore(assistant.chatStore.subscribe, assistant.chatStore.get);
+  const [text, setText] = useState('');
+  const [hasKey, setHasKey] = useState(!!assistant.getApiKey());
+  const [keyDraft, setKeyDraft] = useState('');
+  const [gmailOk, setGmailOk] = useState(gmail.hasGmailToken());
+  const [gmailErr, setGmailErr] = useState('');
+  const dataRef = useRef(store.data); dataRef.current = store.data;
+  const endRef = useRef<HTMLDivElement>(null);
+  const speech = useSpeech(setText);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [chat.items.length, chat.busy]);
+
+  const send = (t = text) => { if (!t.trim() || chat.busy) return; setText(''); assistant.send(t, () => dataRef.current).then(() => setGmailOk(gmail.hasGmailToken())); };
+  const connect = async () => { setGmailErr(''); try { await gmail.connectGmail(); setGmailOk(true); } catch (e: any) { setGmailErr(e.message); } };
+
+  if (!hasKey) return (
+    <div className="max-w-2xl">
+      <PageHead title="Assistant" />
+      <section className="rounded-3xl bg-card p-5 sm:p-6 shadow-soft border border-line">
+        <SectionTitle icon="sparkles">Connect Claude</SectionTitle>
+        <p className="text-[14px] text-muted">Paste your Claude API key (from console.anthropic.com). It is stored only on this device and sent only to Anthropic.</p>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <input className="inp flex-1 min-w-[220px]" type="password" autoComplete="off" placeholder="sk-ant-…" value={keyDraft} onChange={e => setKeyDraft(e.target.value)} />
+          <button className="btn btn-primary" disabled={!keyDraft.trim().startsWith('sk-')} onClick={() => { assistant.setApiKey(keyDraft); setHasKey(true); }}>Save</button>
+        </div>
+      </section>
+    </div>
+  );
+
+  const suggestions = ['Check meine Mails nach neuen Buchungen', 'Was steht als Nächstes an?', 'Leg eine neue Reise an'];
+  return (
+    <div className="max-w-3xl">
+      <PageHead title="Assistant" action={chat.items.length ? <button className="btn btn-ghost" disabled={chat.busy} onClick={assistant.chatStore.reset}><Icon name="plus" size={16} />New chat</button> : undefined} />
+      <div className="flex flex-wrap items-center gap-2 -mt-2 mb-4 text-[13px]">
+        {gmailOk
+          ? <span className="inline-flex items-center gap-1.5 rounded-full bg-card border border-line px-3 py-1.5 text-muted"><span className="h-2 w-2 rounded-full bg-dot" />Gmail connected</span>
+          : <button className="inline-flex items-center gap-1.5 rounded-full bg-card border border-line px-3 py-1.5 font-semibold text-ink" onClick={connect}><Icon name="mail" size={14} />Connect Gmail</button>}
+        {gmailErr && <span className="text-danger">{gmailErr}</span>}
+      </div>
+
+      <div className="space-y-3">
+        {!chat.items.length && (
+          <div className="rounded-3xl bg-card border border-line p-5 shadow-soft">
+            <div className="font-semibold text-ink">Ask me about your trips or let me update them.</div>
+            <p className="text-[14px] text-muted mt-1">I read your trips and Gmail and suggest changes – nothing is saved until you tap Apply.</p>
+            <div className="flex flex-wrap gap-2 mt-3">{suggestions.map(s => <button key={s} className="rounded-full border border-line px-3 py-1.5 text-[13.5px] text-ink hover:bg-white/5" onClick={() => send(s)}>{s}</button>)}</div>
+          </div>
+        )}
+        {chat.items.map((it, i) => {
+          if (it.kind === 'user') return <div key={i} className="flex justify-end"><div className="rounded-2xl rounded-br-md bg-primary text-white px-4 py-2.5 max-w-[85%] whitespace-pre-wrap break-words text-[15px]">{it.text}</div></div>;
+          if (it.kind === 'assistant') return <div key={i} className="rounded-2xl rounded-bl-md bg-card border border-line px-4 py-2.5 max-w-[92%] whitespace-pre-wrap break-words text-[15px] text-ink">{it.text}</div>;
+          if (it.kind === 'activity') return <div key={i} className="flex items-center gap-2 text-[12.5px] text-muted px-1 break-all"><Icon name="search" size={13} />{it.text}</div>;
+          if (it.kind === 'proposal') return <ProposalCard key={it.proposal.id} p={it.proposal} />;
+          return <div key={i} className="flex items-start gap-2 text-[13.5px] text-danger px-1"><Icon name="alert" size={15} className="mt-0.5" />{it.text}</div>;
+        })}
+        {chat.busy && <div className="flex items-center gap-2 text-[13px] text-muted px-1"><Icon name="refresh" size={14} className="animate-spin" />Thinking…</div>}
+        <div ref={endRef} />
+      </div>
+
+      <form className="sticky z-30 mt-5 bottom-[calc(env(safe-area-inset-bottom,0px)+92px)] lg:bottom-6" onSubmit={e => { e.preventDefault(); send(); }}>
+        <div className="flex items-end gap-2 rounded-3xl bg-card border border-line shadow-lift p-2">
+          <textarea className="flex-1 min-w-0 resize-none bg-transparent px-3 py-2 text-[16px] text-ink outline-none max-h-40" rows={1} placeholder="Message the assistant…" value={text}
+            onChange={e => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); send(); } }} />
+          {speech.supported && <button type="button" aria-label="Dictate" onClick={speech.toggle} className={`h-10 w-10 rounded-full grid place-items-center ${speech.on ? 'bg-danger text-white' : 'text-muted hover:text-ink'}`}><Icon name="mic" size={19} /></button>}
+          <button type="submit" aria-label="Send" disabled={chat.busy || !text.trim()} className="h-10 w-10 rounded-full grid place-items-center bg-primary text-white disabled:opacity-40"><Icon name="send" size={18} /></button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 const NAV = [
   { key: 'trips', label: 'Trips', icon: 'plane', href: '#/trips' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar', href: '#/calendar' },
+  { key: 'assistant', label: 'Assistant', icon: 'sparkles', href: '#/assistant' },
   { key: 'contacts', label: 'Contacts', icon: 'users', href: '#/contacts' },
   { key: 'settings', label: 'Settings', icon: 'gear', href: '#/settings' },
 ];
@@ -3245,12 +3520,13 @@ export function App() {
           {route.page === 'calendar' && <CalendarPage />}
           {route.page === 'contacts' && <ContactsPage />}
           {route.page === 'settings' && <SettingsPage theme={theme} setTheme={setTheme} />}
+          {route.page === 'assistant' && <AssistantPage />}
         </div>
       </main>
 
       {/* Mobile bottom navigation: translucent dark green, active tab highlighted */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 rounded-t-[26px] bg-nav/85 backdrop-blur-xl border-t border-white/10 text-white pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-10px_30px_rgb(0_0_0/.35)]">
-        <div className="grid grid-cols-4 gap-1 px-3 pt-2.5 pb-2">
+        <div className="grid grid-cols-5 gap-1 px-2 pt-2.5 pb-2">
           {NAV.map(n => (
             <a key={n.key} href={n.href} aria-current={active === n.key ? 'page' : undefined} className={`flex flex-col items-center justify-center gap-1 text-[12px] font-medium transition ${active === n.key ? 'text-white' : 'text-white/55 hover:text-white/80'}`}>
               <span className={`grid place-items-center h-9 w-full max-w-[86px] rounded-2xl transition ${active === n.key ? 'bg-primary/80' : ''}`}><Icon name={n.icon} size={21} /></span>
