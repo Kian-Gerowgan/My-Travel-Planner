@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as gmail from './gmail';
 
 const KEY = 'mtp:anthropic-key';
-const MODEL = 'claude-opus-5-5';
+const MODEL = 'claude-sonnet-5-5';
 const MAX_STEPS = 16;
 
 export const getApiKey = () => { try { return localStorage.getItem(KEY) || ''; } catch { return ''; } };
